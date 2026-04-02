@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -32,6 +33,9 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// Archivos estáticos
+app.use(express.static(path.join(__dirname, '../public')));
+
 // Rutas
 app.use('/auth', authRoutes);
 app.use('/tenant', tenantRoutes);
@@ -48,7 +52,7 @@ app.use('/mantenimiento', mantenimientoRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {
-  res.json({ mensaje: 'API de Facturación funcionando ✅' });
+  res.sendFile(path.join(__dirname, '../public/index.html')); // ← MODIFICADO
 });
 
 // Ruta de prueba de base de datos
