@@ -22,7 +22,7 @@ const mantenimientoRoutes = require('./routes/mantenimiento');
 const app = express();
 
 // Seguridad
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json());
 
