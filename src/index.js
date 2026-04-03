@@ -20,6 +20,7 @@ const apRoutes = require('./routes/accounts_payable');
 const mantenimientoRoutes = require('./routes/mantenimiento');
 
 const app = express();
+app.set('trust proxy', 1)
 
 // Seguridad
 app.use(helmet({ contentSecurityPolicy: false }));
