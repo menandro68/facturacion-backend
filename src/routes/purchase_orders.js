@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN suppliers s ON po.supplier_id = s.id
       WHERE po.tenant_id = $1
       ORDER BY po.creado_en DESC
-    `, [req.tenantId])
+    `, [req.user.tenant_id])
     res.json({ data: result.rows })
   } catch (err) {
     res.status(500).json({ mensaje: err.message })
@@ -27,7 +27,7 @@ router.get('/:id', async (req, res) => {
   try {
     const orden = await pool.query(
       'SELECT po.*, s.nombre as proveedor_nombre FROM purchase_orders po LEFT JOIN suppliers s ON po.supplier_id = s.id WHERE po.id = $1 AND po.tenant_id = $2',
-      [req.params.id, req.tenantId]
+      [req.params.id, req.user.tenant_id]
     )
     const items = await pool.query(
       'SELECT poi.*, p.nombre as producto_nombre FROM purchase_order_items poi LEFT JOIN products p ON poi.product_id = p.id WHERE poi.order_id = $1',
@@ -46,14 +46,14 @@ router.post('/', async (req, res) => {
   try {
     await client.query('BEGIN')
     const count = await client.query(
-      'SELECT COUNT(*) FROM purchase_orders WHERE tenant_id = $1', [req.tenantId]
+      'SELECT COUNT(*) FROM purchase_orders WHERE tenant_id = $1', [req.user.tenant_id]
     )
     const numero = `OC-${String(parseInt(count.rows[0].count) + 1).padStart(4, '0')}`
     const total = items.reduce((sum, i) => sum + (i.cantidad * i.precio_unitario), 0)
     const orden = await client.query(`
       INSERT INTO purchase_orders (tenant_id, numero, supplier_id, fecha_entrega, notas, total)
       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
-    `, [req.tenantId, numero, supplier_id || null, fecha_entrega || null, notas || '', total])
+    `, [req.user.tenant_id, numero, supplier_id || null, fecha_entrega || null, notas || '', total])
 
     for (const item of items) {
       const subtotal = item.cantidad * item.precio_unitario
@@ -77,7 +77,7 @@ router.put('/:id/estado', async (req, res) => {
   try {
     await pool.query(
       'UPDATE purchase_orders SET estado = $1 WHERE id = $2 AND tenant_id = $3',
-      [req.body.estado, req.params.id, req.tenantId]
+      [req.body.estado, req.params.id, req.user.tenant_id]
     )
     res.json({ mensaje: 'Estado actualizado' })
   } catch (err) {
@@ -90,7 +90,7 @@ router.delete('/:id', async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM purchase_orders WHERE id = $1 AND tenant_id = $2',
-      [req.params.id, req.tenantId]
+      [req.params.id, req.user.tenant_id]
     )
     res.json({ mensaje: 'Orden eliminada' })
   } catch (err) {
