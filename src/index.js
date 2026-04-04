@@ -18,6 +18,7 @@ const inventoryRoutes = require('./routes/inventory');
 const arRoutes = require('./routes/accounts_receivable');
 const apRoutes = require('./routes/accounts_payable');
 const mantenimientoRoutes = require('./routes/mantenimiento');
+const purchaseOrderRoutes = require('./routes/purchase_orders');
 
 const app = express();
 app.set('trust proxy', 1)
@@ -50,6 +51,7 @@ app.use('/inventory', inventoryRoutes);
 app.use('/accounts-receivable', arRoutes);
 app.use('/accounts-payable', apRoutes);
 app.use('/mantenimiento', mantenimientoRoutes);
+app.use('/purchase-orders', purchaseOrderRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

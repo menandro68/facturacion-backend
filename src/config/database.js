@@ -303,6 +303,36 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla choferes creada');
 
+    // Tabla ordenes de compra
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_orders (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        numero VARCHAR(20) NOT NULL,
+        supplier_id UUID REFERENCES suppliers(id),
+        fecha DATE DEFAULT CURRENT_DATE,
+        fecha_entrega DATE,
+        estado VARCHAR(20) DEFAULT 'pendiente',
+        notas TEXT,
+        total DECIMAL(12,2) DEFAULT 0,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla purchase_orders creada');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id),
+        descripcion VARCHAR(255),
+        cantidad DECIMAL(12,2) NOT NULL,
+        precio_unitario DECIMAL(12,2) NOT NULL,
+        subtotal DECIMAL(12,2) NOT NULL
+      )
+    `);
+    console.log('✅ Tabla purchase_order_items creada');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);
