@@ -72,6 +72,20 @@ router.post('/', async (req, res) => {
   }
 })
 
+// PUT editar orden
+router.put('/:id/editar', async (req, res) => {
+  const { supplier_id, fecha_entrega, notas } = req.body
+  try {
+    await pool.query(
+      'UPDATE purchase_orders SET supplier_id = $1, fecha_entrega = $2, notas = $3 WHERE id = $4 AND tenant_id = $5',
+      [supplier_id || null, fecha_entrega || null, notas || '', req.params.id, req.user.tenant_id]
+    )
+    res.json({ mensaje: 'Orden actualizada' })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
 // PUT cambiar estado
 router.put('/:id/estado', async (req, res) => {
   try {
