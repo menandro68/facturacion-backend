@@ -6,6 +6,27 @@ const tenantGuard = require('../middleware/tenantGuard')
 
 router.use(verifyToken, tenantGuard)
 
+// GET ultimo precio de compra por producto
+router.get('/ultimo-precio/:product_id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT poi.precio_unitario, po.creado_en
+      FROM purchase_order_items poi
+      JOIN purchase_orders po ON poi.order_id = po.id
+      WHERE poi.product_id = $1 AND po.tenant_id = $2
+      ORDER BY po.creado_en DESC
+      LIMIT 1
+    `, [req.params.product_id, req.user.tenant_id])
+    if (result.rows.length > 0) {
+      res.json({ data: { precio: result.rows[0].precio_unitario, fecha: result.rows[0].creado_en } })
+    } else {
+      res.json({ data: null })
+    }
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
 // GET todas las órdenes
 router.get('/', async (req, res) => {
   try {
