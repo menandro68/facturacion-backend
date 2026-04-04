@@ -1,7 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const pool = require('../config/db')
-const { verifyToken, tenantGuard } = require('../middleware/auth')
+const verifyToken = require('../middleware/auth')
+const tenantGuard = require('../middleware/tenantGuard')
 
 router.use(verifyToken, tenantGuard)
 
