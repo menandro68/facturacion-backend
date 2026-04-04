@@ -74,15 +74,32 @@ router.post('/', async (req, res) => {
 
 // PUT editar orden
 router.put('/:id/editar', async (req, res) => {
-  const { supplier_id, fecha_entrega, notas } = req.body
+  const { supplier_id, fecha_entrega, notas, items } = req.body
+  const client = await pool.connect()
   try {
-    await pool.query(
-      'UPDATE purchase_orders SET supplier_id = $1, fecha_entrega = $2, notas = $3 WHERE id = $4 AND tenant_id = $5',
-      [supplier_id || null, fecha_entrega || null, notas || '', req.params.id, req.user.tenant_id]
+    await client.query('BEGIN')
+    const total = items ? items.reduce((sum, i) => sum + (i.cantidad * i.precio_unitario), 0) : 0
+    await client.query(
+      'UPDATE purchase_orders SET supplier_id = $1, fecha_entrega = $2, notas = $3, total = $4 WHERE id = $5 AND tenant_id = $6',
+      [supplier_id || null, fecha_entrega || null, notas || '', total, req.params.id, req.user.tenant_id]
     )
+    if (items && items.length > 0) {
+      await client.query('DELETE FROM purchase_order_items WHERE order_id = $1', [req.params.id])
+      for (const item of items) {
+        const subtotal = item.cantidad * item.precio_unitario
+        await client.query(
+          'INSERT INTO purchase_order_items (order_id, product_id, descripcion, cantidad, precio_unitario, subtotal) VALUES ($1, $2, $3, $4, $5, $6)',
+          [req.params.id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, subtotal]
+        )
+      }
+    }
+    await client.query('COMMIT')
     res.json({ mensaje: 'Orden actualizada' })
   } catch (err) {
+    await client.query('ROLLBACK')
     res.status(500).json({ mensaje: err.message })
+  } finally {
+    client.release()
   }
 })
 
