@@ -108,6 +108,30 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       );
     }
 
+    // Actualizar inventario automáticamente al emitir factura
+    for (const item of items) {
+      if (!item.product_id) continue
+      const inv = await client.query(
+        'SELECT * FROM inventory WHERE product_id = $1 AND tenant_id = $2',
+        [item.product_id, tenant_id]
+      )
+      if (inv.rows.length > 0) {
+        const stockAnterior = parseFloat(inv.rows[0].stock_actual)
+        const stockNuevo = stockAnterior - parseFloat(item.cantidad)
+        await client.query(
+          'UPDATE inventory SET stock_actual = $1, actualizado_en = NOW() WHERE id = $2',
+          [stockNuevo, inv.rows[0].id]
+        )
+        await client.query(
+          `INSERT INTO inventory_movements 
+          (tenant_id, inventory_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+          VALUES ($1, $2, 'salida', $3, $4, $5, $6)`,
+          [tenant_id, inv.rows[0].id, item.cantidad, stockAnterior, stockNuevo,
+           `Factura ${ncf}`]
+        )
+      }
+    }
+
     await client.query('COMMIT');
     res.status(201).json({ success: true, data: invoice.rows[0] });
   } catch (error) {
