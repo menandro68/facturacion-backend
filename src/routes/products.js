@@ -38,13 +38,24 @@ router.get('/:id', verifyToken, tenantGuard, async (req, res) => {
 router.post('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, descripcion, precio, itbis_rate, unidad } = req.body;
+    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
     if (!precio) return res.status(400).json({ success: false, mensaje: 'El precio es requerido' });
+
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS costo DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS codigo VARCHAR(50)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS comision_vendedor DECIMAL(5,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS beneficio DECIMAL(5,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS suplidor VARCHAR(150)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_minimo DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_maximo DECIMAL(12,2) DEFAULT 0`);
+
     const result = await pool.query(
-      `INSERT INTO products (tenant_id, nombre, descripcion, precio, itbis_rate, unidad)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tenant_id, nombre, descripcion, precio, itbis_rate || 18.00, unidad || 'unidad']
+      `INSERT INTO products (tenant_id, nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [tenant_id, nombre, descripcion, precio, itbis_rate || 18.00, unidad || 'unidad',
+       costo || 0, codigo || null, comision_vendedor || 0, beneficio || 0, suplidor || null,
+       stock_minimo || 0, stock_maximo || 0]
     );
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
@@ -57,11 +68,25 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, descripcion, precio, itbis_rate, unidad } = req.body;
+    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo } = req.body;
+
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS costo DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS codigo VARCHAR(50)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS comision_vendedor DECIMAL(5,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS beneficio DECIMAL(5,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS suplidor VARCHAR(150)`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_minimo DECIMAL(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_maximo DECIMAL(12,2) DEFAULT 0`);
+
     const result = await pool.query(
-      `UPDATE products SET nombre=$1, descripcion=$2, precio=$3, itbis_rate=$4, unidad=$5, actualizado_en=NOW()
-       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
-      [nombre, descripcion, precio, itbis_rate, unidad, id, tenant_id]
+      `UPDATE products SET 
+        nombre=$1, descripcion=$2, precio=$3, itbis_rate=$4, unidad=$5,
+        costo=$6, codigo=$7, comision_vendedor=$8, beneficio=$9, suplidor=$10,
+        stock_minimo=$11, stock_maximo=$12, actualizado_en=NOW()
+       WHERE id=$13 AND tenant_id=$14 RETURNING *`,
+      [nombre, descripcion, precio, itbis_rate, unidad,
+       costo || 0, codigo || null, comision_vendedor || 0, beneficio || 0, suplidor || null,
+       stock_minimo || 0, stock_maximo || 0, id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Producto no encontrado' });
     res.json({ success: true, data: result.rows[0] });
