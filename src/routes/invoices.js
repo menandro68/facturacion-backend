@@ -67,10 +67,33 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     }
     const total = subtotal + itbis;
 
+    // Asignar NCF automáticamente
+    let seq = await client.query(
+      `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2 AND estado = 'activo'`,
+      [tenant_id, ncf_tipo || 'B01']
+    );
+    if (seq.rows.length === 0) {
+      await client.query(
+        `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max)
+         VALUES ($1, $2, $3, 0, 9999999)`,
+        [tenant_id, ncf_tipo || 'B01', ncf_tipo || 'B01']
+      );
+      seq = await client.query(
+        `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2`,
+        [tenant_id, ncf_tipo || 'B01']
+      );
+    }
+    const nueva_secuencia = seq.rows[0].secuencia_actual + 1;
+    await client.query(
+      `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
+      [nueva_secuencia, seq.rows[0].id]
+    );
+    const ncf = `${ncf_tipo || 'B01'}${String(nueva_secuencia).padStart(8, '0')}`;
+
     const invoice = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_vencimiento)
-       VALUES ($1, $2, $3, 'borrador', $4, $5, $6, $7, $8) RETURNING *`,
-      [tenant_id, customer_id || null, ncf_tipo || 'B01', subtotal, itbis, total, notas || null, fecha_vencimiento || null]
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision) 
+       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW()) RETURNING *`,
+      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null]
     );
     const invoice_id = invoice.rows[0].id;
 
