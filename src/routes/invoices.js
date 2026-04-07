@@ -252,7 +252,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const doc = new PDFDocument({ margin: 50 });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=factura-${data.ncf || data.id}.pdf`);
+    res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
     // Encabezado
