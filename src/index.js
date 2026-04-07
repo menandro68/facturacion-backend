@@ -62,7 +62,7 @@ app.use('/mantenimiento', mantenimientoRoutes);
 app.use('/purchase-orders', purchaseOrderRoutes);
 
 // SPA - servir index.html con no-cache
-app.get('*', (req, res) => {
+app.get('/{*path}', (req, res) => {
   if (!req.path.startsWith('/auth') && !req.path.startsWith('/invoices') && 
       !req.path.startsWith('/customers') && !req.path.startsWith('/products') &&
       !req.path.startsWith('/payments') && !req.path.startsWith('/reports') &&
