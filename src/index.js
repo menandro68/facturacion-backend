@@ -61,9 +61,20 @@ app.use('/accounts-payable', apRoutes);
 app.use('/mantenimiento', mantenimientoRoutes);
 app.use('/purchase-orders', purchaseOrderRoutes);
 
-// Ruta de prueba
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+// SPA - servir index.html con no-cache
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/auth') && !req.path.startsWith('/invoices') && 
+      !req.path.startsWith('/customers') && !req.path.startsWith('/products') &&
+      !req.path.startsWith('/payments') && !req.path.startsWith('/reports') &&
+      !req.path.startsWith('/suppliers') && !req.path.startsWith('/inventory') &&
+      !req.path.startsWith('/accounts') && !req.path.startsWith('/mantenimiento') &&
+      !req.path.startsWith('/purchase') && !req.path.startsWith('/tenant') &&
+      !req.path.startsWith('/db-test')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+    res.sendFile(path.join(__dirname, '../public/index.html'))
+  }
 });
 
 // Ruta de prueba de base de datos
