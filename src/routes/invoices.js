@@ -232,86 +232,128 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const { id } = req.params;
 
     const invoice = await pool.query(
-      `SELECT i.*, c.nombre as cliente_nombre, c.rnc_cedula, c.email as cliente_email,
-              t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email
+      `SELECT i.*, c.nombre as cliente_nombre, c.rnc_cedula, c.telefono as cliente_telefono,
+              c.direccion as cliente_direccion, c.condiciones as cliente_condiciones,
+              c.email as cliente_negocio,
+              t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
+              v.nombre as vendedor_nombre
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        JOIN tenants t ON i.tenant_id = t.id
+       LEFT JOIN vendedores v ON c.vendedor_id = v.id
        WHERE i.id = $1 AND i.tenant_id = $2`,
       [id, tenant_id]
     );
     if (!invoice.rows[0]) return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' });
 
-    const items = await pool.query(
-      `SELECT * FROM invoice_items WHERE invoice_id = $1`,
-      [id]
-    );
-
+    const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
+
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 50 });
+    // Media carta: 5.5 x 8.5 pulgadas = 396 x 612 puntos
+    const doc = new PDFDocument({ margin: 30, size: [396, 612] });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
-    // Encabezado
-    doc.fontSize(20).font('Helvetica-Bold').text(data.empresa_nombre || 'Mi Empresa', { align: 'center' });
-    doc.fontSize(10).font('Helvetica').text(`RNC: ${data.empresa_rnc || 'N/A'}`, { align: 'center' });
-    doc.moveDown();
+    const W = 396;
+    const M = 30;
+    const col = W - M * 2;
+    const azul = '#1E40AF';
+    const gris = '#F1F5F9';
+    const negro = '#1E293B';
 
-    // Info factura
-    doc.fontSize(14).font('Helvetica-Bold').text(`FACTURA`, { align: 'center' });
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`NCF: ${data.ncf || 'BORRADOR'}`, { align: 'center' });
-    doc.text(`Estado: ${data.estado.toUpperCase()}`, { align: 'center' });
-    doc.text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString() : new Date().toLocaleDateString()}`, { align: 'center' });
-    doc.moveDown();
+    // === ENCABEZADO AZUL ===
+    doc.rect(0, 0, W, 80).fill(azul);
+    doc.fillColor('white').fontSize(15).font('Helvetica-Bold')
+       .text(data.empresa_nombre || 'Mi Empresa', M, 15, { width: col });
+    doc.fontSize(8).font('Helvetica')
+       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 35, { width: col });
+    doc.fontSize(8).text(data.empresa_email || '', M, 47, { width: col });
 
-    // Cliente
-    doc.fontSize(11).font('Helvetica-Bold').text('CLIENTE:');
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`Nombre: ${data.cliente_nombre || 'Consumidor Final'}`);
-    doc.text(`RNC/Cédula: ${data.rnc_cedula || 'N/A'}`);
-    doc.moveDown();
+    // Número de factura (derecha)
+    doc.fontSize(9).font('Helvetica-Bold').text('FACTURA', M, 15, { width: col, align: 'right' });
+    doc.fontSize(8).font('Helvetica').text(`NCF: ${data.ncf || 'N/A'}`, M, 28, { width: col, align: 'right' });
+    doc.fontSize(7).text(`Estado: ${data.estado.toUpperCase()}`, M, 40, { width: col, align: 'right' });
+    doc.fontSize(7).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, M, 52, { width: col, align: 'right' });
 
-    // Línea separadora
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-    doc.moveDown(0.5);
+    let y = 90;
 
-    // Encabezado tabla items
-    doc.fontSize(10).font('Helvetica-Bold');
-    doc.text('Descripción', 50, doc.y, { width: 200 });
-    doc.text('Cant.', 260, doc.y - 12, { width: 60 });
-    doc.text('Precio', 320, doc.y - 12, { width: 80 });
-    doc.text('ITBIS', 400, doc.y - 12, { width: 60 });
-    doc.text('Total', 470, doc.y - 12, { width: 80 });
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-    doc.moveDown(0.5);
+    // === BLOQUE CLIENTE ===
+    doc.rect(M, y, col, 75).fill(gris).stroke('#E2E8F0');
+    doc.fillColor(azul).fontSize(8).font('Helvetica-Bold').text('CLIENTE', M + 6, y + 6);
+    doc.fillColor(negro).fontSize(8).font('Helvetica-Bold')
+       .text(data.cliente_nombre || 'Consumidor Final', M + 6, y + 17, { width: (col / 2) - 10 });
+    doc.fontSize(7).font('Helvetica')
+       .text(`RNC/Cédula: ${data.rnc_cedula || 'N/A'}`, M + 6, y + 29)
+       .text(`Tel: ${data.cliente_telefono || 'N/A'}`, M + 6, y + 40)
+       .text(`Dir: ${data.cliente_direccion || 'N/A'}`, M + 6, y + 51, { width: (col / 2) - 10 });
 
-    // Items
-    doc.font('Helvetica').fontSize(10);
+    // Lado derecho del bloque cliente
+    const rx = M + col / 2 + 6;
+    doc.fillColor(azul).fontSize(8).font('Helvetica-Bold').text('CONDICIONES', rx, y + 6);
+    const condMap = { contado: 'Contado', '7_dias': '7 Días', '15_dias': '15 Días', '30_dias': '30 Días', '45_dias': '45 Días', '60_dias': '60 Días' };
+    doc.fillColor(negro).fontSize(7).font('Helvetica')
+       .text(condMap[data.cliente_condiciones] || 'Contado', rx, y + 17)
+       .text(`Vendedor: ${data.vendedor_nombre || 'N/A'}`, rx, y + 29)
+       .text(`Negocio: ${data.cliente_negocio || 'N/A'}`, rx, y + 40, { width: col / 2 - 10 });
+
+    y += 82;
+
+    // === TABLA ENCABEZADO ===
+    doc.rect(M, y, col, 16).fill(azul);
+    doc.fillColor('white').fontSize(7).font('Helvetica-Bold');
+    doc.text('DESCRIPCIÓN', M + 4, y + 4, { width: 130 });
+    doc.text('CANT', M + 138, y + 4, { width: 35, align: 'right' });
+    doc.text('P. UNIT', M + 178, y + 4, { width: 52, align: 'right' });
+    doc.text('ITBIS', M + 234, y + 4, { width: 42, align: 'right' });
+    doc.text('TOTAL', M + 280, y + 4, { width: 52, align: 'right' });
+    y += 16;
+
+    // === ITEMS ===
+    doc.fontSize(7).font('Helvetica');
+    let rowColor = true;
     for (const item of items.rows) {
-      const y = doc.y;
-      doc.text(item.descripcion, 50, y, { width: 200 });
-      doc.text(item.cantidad, 260, y, { width: 60 });
-      doc.text(`RD$${parseFloat(item.precio_unitario).toFixed(2)}`, 320, y, { width: 80 });
-      doc.text(`RD$${parseFloat(item.itbis_monto).toFixed(2)}`, 400, y, { width: 60 });
-      doc.text(`RD$${parseFloat(item.total).toFixed(2)}`, 470, y, { width: 80 });
-      doc.moveDown();
+      const rowH = 14;
+      if (rowColor) doc.rect(M, y, col, rowH).fill('#F8FAFC');
+      rowColor = !rowColor;
+      doc.fillColor(negro)
+         .text(item.descripcion, M + 4, y + 3, { width: 130 })
+         .text(parseFloat(item.cantidad).toFixed(0), M + 138, y + 3, { width: 35, align: 'right' })
+         .text(`RD$${parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 178, y + 3, { width: 52, align: 'right' })
+         .text(`RD$${parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 234, y + 3, { width: 42, align: 'right' })
+         .text(`RD$${parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 280, y + 3, { width: 52, align: 'right' });
+      doc.moveTo(M, y + rowH).lineTo(M + col, y + rowH).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
+      y += rowH;
     }
 
-    // Línea separadora
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-    doc.moveDown(0.5);
+    y += 8;
 
-    // Totales
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`Subtotal: RD$${parseFloat(data.subtotal).toFixed(2)}`, { align: 'right' });
-    doc.text(`ITBIS (18%): RD$${parseFloat(data.itbis).toFixed(2)}`, { align: 'right' });
-    doc.fontSize(12).font('Helvetica-Bold');
-    doc.text(`TOTAL: RD$${parseFloat(data.total).toFixed(2)}`, { align: 'right' });
+    // === TOTALES ===
+    const tw = 180;
+    const tx = M + col - tw;
+    doc.rect(tx, y, tw, 14).fill(gris);
+    doc.fillColor(negro).fontSize(7).font('Helvetica')
+       .text('Subtotal:', tx + 4, y + 3, { width: tw - 60 })
+       .text(`RD$${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 3, { width: tw - 4, align: 'right' });
+    y += 14;
+    doc.rect(tx, y, tw, 14).fill(gris);
+    doc.fillColor(negro).fontSize(7).font('Helvetica')
+       .text('ITBIS (18%):', tx + 4, y + 3)
+       .text(`RD$${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 3, { width: tw - 4, align: 'right' });
+    y += 14;
+    doc.rect(tx, y, tw, 18).fill(azul);
+    doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+       .text('TOTAL:', tx + 4, y + 4)
+       .text(`RD$${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 4, { width: tw - 4, align: 'right' });
+    y += 26;
+
+    // === FOOTER ===
+    doc.moveTo(M, y).lineTo(M + col, y).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+    y += 6;
+    doc.fillColor('#94A3B8').fontSize(6).font('Helvetica')
+       .text('Gracias por su preferencia', M, y, { width: col, align: 'center' });
 
     doc.end();
   } catch (error) {
