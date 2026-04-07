@@ -323,10 +323,10 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       doc.fillColor(negro)
          .text(item.descripcion, M + 4, y + 3, { width: 100 })
          .text(parseFloat(item.cantidad).toFixed(0), M + 108, y + 3, { width: 28, align: 'right' })
-         .text(`RD$${parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 140, y + 3, { width: 48, align: 'right' })
-         .text(`RD$${subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 192, y + 3, { width: 48, align: 'right' })
-         .text(`RD$${parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 244, y + 3, { width: 38, align: 'right' })
-         .text(`RD$${parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, M + 286, y + 3, { width: 46, align: 'right' });
+         .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), M + 140, y + 3, { width: 48, align: 'right' })
+         .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), M + 192, y + 3, { width: 48, align: 'right' })
+         .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), M + 244, y + 3, { width: 38, align: 'right' })
+         .text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), M + 286, y + 3, { width: 46, align: 'right' });
       doc.moveTo(M, y + rowH).lineTo(M + col, y + rowH).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
       y += rowH;
     }
