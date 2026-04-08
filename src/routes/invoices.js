@@ -22,6 +22,42 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET - Reporte de ventas por producto
+router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { fecha_inicio, fecha_fin, vendedor_id, customer_id } = req.query;
+
+    const result = await pool.query(`
+      SELECT 
+        ii.descripcion,
+        SUM(ii.cantidad) as total_cantidad,
+        ii.precio_unitario,
+        SUM(ii.subtotal) as total_subtotal,
+        SUM(ii.itbis_monto) as total_itbis,
+        SUM(ii.total) as total_venta,
+        COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0)), 0) as total_costo,
+        SUM(ii.subtotal) - COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0)), 0) as beneficio
+      FROM invoices i
+      LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
+      LEFT JOIN products p ON p.id = ii.product_id
+      LEFT JOIN customers c ON c.id = i.customer_id
+      WHERE i.tenant_id = $1
+        AND i.estado != 'anulada'
+        AND ($2::date IS NULL OR i.creado_en::date >= $2::date)
+        AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
+        AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
+        AND ($5::uuid IS NULL OR i.customer_id = $5::uuid)
+      GROUP BY ii.descripcion, ii.precio_unitario
+      ORDER BY total_venta DESC
+    `, [tenant_id, fecha_inicio || null, fecha_fin || null, vendedor_id || null, customer_id || null]);
+
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // GET - Reporte de ventas por rango de fechas
 router.get('/reporte/resumen', verifyToken, tenantGuard, async (req, res) => {
   try {
