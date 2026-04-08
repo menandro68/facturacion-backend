@@ -26,7 +26,7 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
 router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { fecha_inicio, fecha_fin, vendedor_id, customer_id } = req.query;
+    const { fecha_inicio, fecha_fin, vendedor_id, customer_id, producto } = req.query;
 
     const result = await pool.query(`
       SELECT 
@@ -48,9 +48,10 @@ router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
         AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
         AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
         AND ($5::uuid IS NULL OR i.customer_id = $5::uuid)
+        AND ($6::text IS NULL OR ii.descripcion ILIKE $6::text)
       GROUP BY ii.descripcion, ii.precio_unitario
       ORDER BY total_venta DESC
-    `, [tenant_id, fecha_inicio || null, fecha_fin || null, vendedor_id || null, customer_id || null]);
+    `, [tenant_id, fecha_inicio || null, fecha_fin || null, vendedor_id || null, customer_id || null, producto ? `%${producto}%` : null]);
 
     res.json({ success: true, data: result.rows });
   } catch (error) {
