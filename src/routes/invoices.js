@@ -99,7 +99,7 @@ router.get('/reporte/resumen', verifyToken, tenantGuard, async (req, res) => {
 router.get('/pedidos/lista', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { vendedor_id } = req.query;
+    const { vendedor_id, fecha_inicio, fecha_fin } = req.query;
     let query, params;
     if (vendedor_id) {
       query = `SELECT i.*, c.nombre as cliente_nombre
@@ -107,15 +107,19 @@ router.get('/pedidos/lista', verifyToken, tenantGuard, async (req, res) => {
                INNER JOIN customers c ON i.customer_id = c.id
                WHERE i.tenant_id = $1 AND i.estado = 'pedido'
                  AND c.vendedor_id = $2::uuid
+                 AND ($3::date IS NULL OR i.creado_en::date >= $3::date)
+                 AND ($4::date IS NULL OR i.creado_en::date <= $4::date)
                ORDER BY i.creado_en DESC`;
-      params = [tenant_id, vendedor_id];
+      params = [tenant_id, vendedor_id, fecha_inicio || null, fecha_fin || null];
     } else {
       query = `SELECT i.*, c.nombre as cliente_nombre
                FROM invoices i
                LEFT JOIN customers c ON i.customer_id = c.id
                WHERE i.tenant_id = $1 AND i.estado = 'pedido'
+                 AND ($2::date IS NULL OR i.creado_en::date >= $2::date)
+                 AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
                ORDER BY i.creado_en DESC`;
-      params = [tenant_id];
+      params = [tenant_id, fecha_inicio || null, fecha_fin || null];
     }
     const result = await pool.query(query, params);
     res.json({ success: true, data: result.rows });
