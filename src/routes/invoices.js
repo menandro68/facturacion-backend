@@ -104,9 +104,9 @@ router.get('/pedidos/lista', verifyToken, tenantGuard, async (req, res) => {
     if (vendedor_id) {
       query = `SELECT i.*, c.nombre as cliente_nombre
                FROM invoices i
-               LEFT JOIN customers c ON i.customer_id = c.id
+               INNER JOIN customers c ON i.customer_id = c.id
                WHERE i.tenant_id = $1 AND i.estado = 'pedido'
-                 AND c.vendedor_id = $2
+                 AND c.vendedor_id = $2::uuid
                ORDER BY i.creado_en DESC`;
       params = [tenant_id, vendedor_id];
     } else {
