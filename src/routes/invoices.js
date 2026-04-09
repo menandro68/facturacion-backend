@@ -95,15 +95,15 @@ router.get('/reporte/resumen', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// GET - Listar cotizaciones
-router.get('/cotizaciones/lista', verifyToken, tenantGuard, async (req, res) => {
+// GET - Listar notas de crédito
+router.get('/nota-credito/lista', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const result = await pool.query(
       `SELECT i.*, c.nombre as cliente_nombre
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
-       WHERE i.tenant_id = $1 AND i.estado = 'cotizacion'
+       WHERE i.tenant_id = $1 AND i.estado = 'nota_credito'
        ORDER BY i.creado_en DESC`,
       [tenant_id]
     );
@@ -113,83 +113,93 @@ router.get('/cotizaciones/lista', verifyToken, tenantGuard, async (req, res) => 
   }
 });
 
-// POST - Crear cotización
-router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
+// POST - Crear nota de crédito
+router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
   try {
     const { tenant_id } = req.user;
-    const { customer_id, notas, items } = req.body;
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, mensaje: 'La cotización debe tener al menos un item' });
+    const { factura_id, items, motivo } = req.body;
+    if (!factura_id || !items || items.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'Datos incompletos' });
     }
     await client.query('BEGIN');
-    let subtotal = 0, itbis = 0;
-    for (const item of items) {
-      const s = item.cantidad * item.precio_unitario;
-      subtotal += s;
-      itbis += s * (item.itbis_rate / 100);
-    }
-    const total = subtotal + itbis;
-    const invoice = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision)
-       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, $6, NOW()) RETURNING *`,
-      [tenant_id, customer_id || null, subtotal, itbis, total, notas || null]
-    );
-    const invoice_id = invoice.rows[0].id;
-    for (const item of items) {
-      const s = item.cantidad * item.precio_unitario;
-      const item_itbis = s * (item.itbis_rate / 100);
-      await client.query(
-        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, s, s + item_itbis]
-      );
-    }
-    await client.query('COMMIT');
-    res.status(201).json({ success: true, data: invoice.rows[0] });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ success: false, mensaje: error.message });
-  } finally {
-    client.release();
-  }
-});
 
-// PUT - Convertir cotización a factura
-router.put('/cotizacion/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const { tenant_id } = req.user;
-    const { id } = req.params;
-    await client.query('BEGIN');
-    const inv = await client.query(`SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`, [id, tenant_id]);
-    if (!inv.rows[0]) return res.status(404).json({ success: false, mensaje: 'No encontrada' });
+    // Verificar factura original
+    const facturaOrig = await client.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2 AND estado='emitida'`,
+      [factura_id, tenant_id]
+    );
+    if (!facturaOrig.rows[0]) {
+      return res.status(404).json({ success: false, mensaje: 'Factura no encontrada o no emitida' });
+    }
+
+    // Generar número NC
     let seq = await client.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`, [tenant_id]
+      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='NC' AND estado='activo'`, [tenant_id]
     );
     if (seq.rows.length === 0) {
-      await client.query(`INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max) VALUES ($1,'B01','B01',0,9999999)`, [tenant_id]);
-      seq = await client.query(`SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01'`, [tenant_id]);
+      await client.query(
+        `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max) VALUES ($1,'NC','NC',0,9999999)`,
+        [tenant_id]
+      );
+      seq = await client.query(`SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='NC'`, [tenant_id]);
     }
     const nueva_sec = seq.rows[0].secuencia_actual + 1;
     await client.query(`UPDATE ncf_sequences SET secuencia_actual=$1 WHERE id=$2`, [nueva_sec, seq.rows[0].id]);
-    const ncf = `B01${String(nueva_sec).padStart(8,'0')}`;
-    const items = await client.query(`SELECT * FROM invoice_items WHERE invoice_id=$1`, [id]);
-    for (const item of items.rows) {
-      const inv2 = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [item.product_id, tenant_id]);
-      if (inv2.rows.length > 0) {
-        const stockNuevo = parseFloat(inv2.rows[0].stock_actual) - parseFloat(item.cantidad);
-        await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevo, inv2.rows[0].id]);
-        await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
-          [tenant_id, inv2.rows[0].id, item.cantidad, inv2.rows[0].stock_actual, stockNuevo, `Factura ${ncf}`]);
+    const nc_numero = `NC${String(nueva_sec).padStart(8,'0')}`;
+
+    // Calcular totales de la nota
+    let subtotal = 0, itbis = 0;
+    for (const item of items) {
+      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      subtotal += s;
+      itbis += s * (parseFloat(item.itbis_rate || 0) / 100);
+    }
+    const total = subtotal + itbis;
+
+    // Crear nota de crédito
+    const nota = await client.query(
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, referencia_id)
+       VALUES ($1, $2, 'NC', $3, 'nota_credito', $4, $5, $6, $7, NOW(), $8) RETURNING *`,
+      [tenant_id, facturaOrig.rows[0].customer_id, nc_numero, subtotal, itbis, total,
+       motivo || `Nota de crédito por factura ${facturaOrig.rows[0].ncf}`, factura_id]
+    );
+    const nota_id = nota.rows[0].id;
+
+    // Insertar items y revertir inventario
+    for (const item of items) {
+      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const item_itbis = s * (parseFloat(item.itbis_rate || 0) / 100);
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [nota_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario,
+         item.itbis_rate || 0, item_itbis, s, s + item_itbis]
+      );
+      // Revertir inventario (devolver stock)
+      if (item.product_id) {
+        const inv = await client.query(
+          'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
+          [item.product_id, tenant_id]
+        );
+        if (inv.rows.length > 0) {
+          const stockNuevo = parseFloat(inv.rows[0].stock_actual) + parseFloat(item.cantidad);
+          await client.query(
+            'UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
+            [stockNuevo, inv.rows[0].id]
+          );
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
+            [tenant_id, inv.rows[0].id, item.cantidad, inv.rows[0].stock_actual, stockNuevo,
+             `Nota de crédito ${nc_numero}`]
+          );
+        }
       }
     }
-    const updated = await client.query(
-      `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo='B01', fecha_emision=NOW(), actualizado_en=NOW() WHERE id=$2 RETURNING *`,
-      [ncf, id]
-    );
+
     await client.query('COMMIT');
-    res.json({ success: true, data: updated.rows[0] });
+    res.status(201).json({ success: true, data: nota.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK');
     res.status(500).json({ success: false, mensaje: error.message });
