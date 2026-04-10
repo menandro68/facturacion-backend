@@ -309,16 +309,16 @@ Error generating stack: `+e.message+`
                       <td class="px-4 py-3 text-right text-sm font-medium text-red-600">RD$${parseFloat(e.total).toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
                       <td class="px-4 py-3 text-sm">${e.fecha_vencimiento?new Date(e.fecha_vencimiento).toLocaleDateString(`es-DO`):`-`}</td>
                       <td class="px-4 py-3 text-sm">${new Date(e.creado_en).toLocaleDateString(`es-DO`)}</td>
-                    </tr>`).join(``)},children:`Buscar`}),(0,B.jsx)(`button`,{className:`bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700`,onClick:()=>{let e=u.find(e=>e.id===document.getElementById(`cxc-vendedor`).value)?.nombre||``;document.getElementById(`cxc-resultado`).innerHTML,document.getElementById(`cxc-tbody`).innerHTML;let t=window.open(``,`_blank`),n=new Date,r=k.map(e=>{let t=new Date(e.creado_en),r=e.fecha_vencimiento?Math.max(0,Math.floor((n-new Date(e.fecha_vencimiento))/(1e3*60*60*24))):0,i=parseFloat(e.monto_pagado||0),a=parseFloat(e.total)-i;return`<tr>
+                    </tr>`).join(``)},children:`Buscar`}),(0,B.jsx)(`button`,{className:`bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700`,onClick:()=>{let e=u.find(e=>e.id===document.getElementById(`cxc-vendedor`).value)?.nombre||``;document.getElementById(`cxc-resultado`).innerHTML,document.getElementById(`cxc-tbody`).innerHTML;let t=window.open(``,`_blank`),n=new Date,r=c.filter(e=>e.estado===`nota_credito`),i=k.map(e=>{let t=new Date(e.creado_en),i=e.fecha_vencimiento?Math.max(0,Math.floor((n-new Date(e.fecha_vencimiento))/(1e3*60*60*24))):0,a=r.filter(t=>t.referencia_id===e.id).reduce((e,t)=>e+parseFloat(t.total||0),0),o=parseFloat(e.monto_pagado||0),s=parseFloat(e.total)-a-o;return`<tr>
                     <td>${e.ncf||`N/A`}</td>
                     <td>${e.cliente_nombre||`Consumidor Final`}</td>
                     <td style="text-align:center">${t.toLocaleDateString(`es-DO`)}</td>
                     <td style="text-align:right">${parseFloat(e.total).toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
-                    <td style="text-align:center">${r}</td>
-                    <td style="text-align:right">-</td>
-                    <td style="text-align:right">${i>0?i.toLocaleString(`es-DO`,{minimumFractionDigits:2}):`-`}</td>
-                    <td style="text-align:right;font-weight:bold">${a.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
-                  </tr>`}).join(``),i=k.reduce((e,t)=>e+parseFloat(t.total||0),0);t.document.write(`
+                    <td style="text-align:center;${i>60?`color:#dc2626;font-weight:bold`:``}">${i}</td>
+                    <td style="text-align:right">${a>0?a.toLocaleString(`es-DO`,{minimumFractionDigits:2}):`-`}</td>
+                    <td style="text-align:right">${o>0?o.toLocaleString(`es-DO`,{minimumFractionDigits:2}):`-`}</td>
+                    <td style="text-align:right;font-weight:bold">${s.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
+                  </tr>`}).join(``),a=k.reduce((e,t)=>e+parseFloat(t.total||0),0);t.document.write(`
                   <!DOCTYPE html><html><head><title>CXC Vendedor</title>
                   <style>
                     body{font-family:Arial,sans-serif;padding:20px;color:#1e293b}
@@ -345,12 +345,12 @@ Error generating stack: `+e.message+`
                       <th style="text-align:right">BALANCE</th>
                     </tr></thead>
                     <tbody>
-                      ${r}
+                      ${i}
                       <tr class="total-row">
                         <td colspan="3">TOTAL</td>
-                        <td style="text-align:right">${i.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
+                        <td style="text-align:right">${a.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
                         <td colspan="3"></td>
-                        <td style="text-align:right">${i.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
+                        <td style="text-align:right">${a.toLocaleString(`es-DO`,{minimumFractionDigits:2})}</td>
                       </tr>
                     </tbody>
                   </table>
