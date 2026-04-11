@@ -71,10 +71,10 @@ const register = async (req, res) => {
 
 // LOGIN
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, usuario, password } = req.body;
 
   try {
-    if (!email || !password) {
+    if ((!email && !usuario) || !password) {
       return res.status(400).json({ 
         mensaje: 'Email y password son requeridos' 
       });
@@ -125,8 +125,8 @@ const login = async (req, res) => {
       `SELECT v.*, t.nombre as empresa, t.estado as tenant_estado
        FROM vendedores v
        JOIN tenants t ON v.tenant_id = t.id
-       WHERE v.email = $1 AND v.activo = true`,
-      [email]
+       WHERE v.usuario = $1 AND v.activo = true`,
+      [usuario || email]
     );
 
     if (resultVendedor.rows.length === 0) {
