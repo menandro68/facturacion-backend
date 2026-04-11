@@ -86,12 +86,20 @@ router.get('/vendedores', verifyToken, tenantGuard, async (req, res) => {
 router.post('/vendedores', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, cedula, email, telefono, zona_id, comision_pct } = req.body;
+    const { nombre, cedula, email, telefono, zona_id, comision_pct, usuario, password } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
+
+    let password_hash = null;
+    if (password) {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      password_hash = await bcrypt.hash(password, salt);
+    }
+
     const result = await pool.query(
-      `INSERT INTO vendedores (tenant_id, nombre, cedula, email, telefono, zona_id, comision_pct)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [tenant_id, nombre, cedula || null, email || null, telefono || null, zona_id || null, comision_pct || 0]
+      `INSERT INTO vendedores (tenant_id, nombre, cedula, email, telefono, zona_id, comision_pct, usuario, password_hash)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [tenant_id, nombre, cedula || null, email || null, telefono || null, zona_id || null, comision_pct || 0, usuario || null, password_hash]
     );
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
@@ -103,11 +111,25 @@ router.put('/vendedores/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, cedula, email, telefono, zona_id, comision_pct } = req.body;
+    const { nombre, cedula, email, telefono, zona_id, comision_pct, usuario, password } = req.body;
+
+    let password_hash_update = '';
+    let params = [nombre, cedula, email, telefono, zona_id || null, comision_pct, usuario || null];
+
+    if (password) {
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      const hash = await bcrypt.hash(password, salt);
+      password_hash_update = ', password_hash=$8';
+      params.push(hash, id, tenant_id);
+    } else {
+      params.push(id, tenant_id);
+    }
+
     const result = await pool.query(
-      `UPDATE vendedores SET nombre=$1, cedula=$2, email=$3, telefono=$4, zona_id=$5, comision_pct=$6, actualizado_en=NOW()
-       WHERE id=$7 AND tenant_id=$8 RETURNING *`,
-      [nombre, cedula, email, telefono, zona_id || null, comision_pct, id, tenant_id]
+      `UPDATE vendedores SET nombre=$1, cedula=$2, email=$3, telefono=$4, zona_id=$5, comision_pct=$6, usuario=$7${password_hash_update}, actualizado_en=NOW()
+       WHERE id=$${params.length - 1} AND tenant_id=$${params.length} RETURNING *`,
+      params
     );
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
