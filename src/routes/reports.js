@@ -110,7 +110,7 @@ router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
         COUNT(*) as facturas_mes,
         COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as ventas_mes,
         COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as cobrado_mes,
-        COALESCE(SUM(CASE WHEN estado = 'emitida' THEN total END), 0) as pendiente_mes
+        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as pendiente_mes
        FROM invoices
        WHERE tenant_id = $1
        AND DATE_TRUNC('month', creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
