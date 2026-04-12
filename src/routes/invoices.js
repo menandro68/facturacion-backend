@@ -171,6 +171,61 @@ router.post('/pedido', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// PUT - Editar pedido
+router.put('/pedido/:id/editar', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const { tenant_id } = req.user
+    const { id } = req.params
+    const { customer_id, items } = req.body
+
+    await client.query('BEGIN')
+
+    // Verificar que el pedido existe
+    const pedido = await client.query(
+      `SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2 AND estado = 'pedido'`,
+      [id, tenant_id]
+    )
+    if (!pedido.rows[0]) return res.status(404).json({ success: false, mensaje: 'Pedido no encontrado' })
+
+    // Recalcular totales
+    let subtotal = 0, itbis_total = 0
+    items.forEach(item => {
+      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
+      subtotal += s
+      itbis_total += s * (parseFloat(item.itbis_rate || 0) / 100)
+    })
+    const total = subtotal + itbis_total
+
+    // Actualizar factura
+    await client.query(
+      `UPDATE invoices SET customer_id=$1, subtotal=$2, itbis=$3, total=$4, actualizado_en=NOW() WHERE id=$5`,
+      [customer_id || null, subtotal, itbis_total, total, id]
+    )
+
+    // Eliminar items anteriores
+    await client.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [id])
+
+    // Insertar nuevos items
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, subtotal)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario,
+         item.itbis_rate || 0, parseFloat(item.cantidad) * parseFloat(item.precio_unitario)]
+      )
+    }
+
+    await client.query('COMMIT')
+    res.json({ success: true, mensaje: 'Pedido actualizado' })
+  } catch (error) {
+    await client.query('ROLLBACK')
+    res.status(500).json({ success: false, mensaje: error.message })
+  } finally {
+    client.release()
+  }
+})
+
 // PUT - Convertir pedido a factura
 router.put('/pedido/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
