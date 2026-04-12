@@ -282,7 +282,7 @@ Error generating stack: `+e.message+`
                 <button onclick="
                   if(confirm('¿Desea convertir este pedido a factura?')){
                     fetch('https://facturacion-saas-production.up.railway.app/invoices/pedido/${e.id}/convertir',{method:'PUT',headers:{'Authorization':'Bearer '+sessionStorage.getItem('token'),'Content-Type':'application/json'}})
-                    .then(r=>r.json()).then(d=>{if(d.success){const fid=d.data?.id||d.id;const tok=sessionStorage.getItem('token');if(confirm('¿Desea imprimir esta factura?')){window.open('https://facturacion-saas-production.up.railway.app/invoices/'+fid+'/pdf?token='+tok,'_blank')}window.close()}else{alert(d.mensaje||'Error')}})
+                    .then(r=>r.json()).then(d=>{if(d.success){const fid=d.data?.id||d.id;const tok=sessionStorage.getItem('token');if(confirm('¿Desea imprimir esta factura?')){window.location.href='https://facturacion-saas-production.up.railway.app/invoices/'+fid+'/pdf?token='+tok}else{window.close()}}else{alert(d.mensaje||'Error')}})
                     .catch(()=>alert('Error al convertir'))
                   }
                 " style="padding:8px 20px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">✅ Convertir a Factura</button>
