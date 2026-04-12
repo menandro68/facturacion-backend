@@ -282,7 +282,18 @@ Error generating stack: `+e.message+`
                 <button onclick="
                   if(confirm('¿Desea convertir este pedido a factura?')){
                     fetch('https://facturacion-saas-production.up.railway.app/invoices/pedido/${e.id}/convertir',{method:'PUT',headers:{'Authorization':'Bearer '+sessionStorage.getItem('token'),'Content-Type':'application/json'}})
-                    .then(r=>r.json()).then(d=>{if(d.success){alert('¡Factura emitida exitosamente!');window.close()}else{alert(d.mensaje||'Error')}})
+                    .then(r=>r.json()).then(d=>{
+                      if(d.success){
+                        const facturaId = d.data?.id || d.id
+                        const token = sessionStorage.getItem('token')
+                        const dlg = document.createElement('div')
+                        dlg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999'
+                        dlg.innerHTML='<div style="background:white;border-radius:12px;padding:32px;text-align:center;width:320px;box-shadow:0 20px 60px rgba(0,0,0,0.3)"><p style="font-size:16px;font-weight:600;color:#1e293b;margin-bottom:24px">¿Desea imprimir esta factura?</p><div style="display:flex;gap:12px;justify-content:center"><button id="btn-si" style="padding:10px 28px;background:#2563eb;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">Sí, Imprimir</button><button id="btn-volver" style="padding:10px 28px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;font-size:14px">Volver</button></div></div>'
+                        document.body.appendChild(dlg)
+                        document.getElementById('btn-si').onclick=()=>{ window.open('https://facturacion-saas-production.up.railway.app/invoices/'+facturaId+'/pdf?token='+token,'_blank'); window.close() }
+                        document.getElementById('btn-volver').onclick=()=>{ window.close() }
+                      }else{alert(d.mensaje||'Error')}
+                    })
                     .catch(()=>alert('Error al convertir'))
                   }
                 " style="padding:8px 20px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">✅ Convertir a Factura</button>
