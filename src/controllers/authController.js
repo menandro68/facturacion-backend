@@ -81,12 +81,13 @@ const login = async (req, res) => {
     }
 
     // ── 1. Buscar en users (admin) ──
+    const login_input = email || usuario;
     const resultUser = await pool.query(
       `SELECT u.*, t.nombre as empresa, t.estado as tenant_estado 
        FROM users u 
        JOIN tenants t ON u.tenant_id = t.id 
        WHERE u.email = $1`,
-      [email]
+      [login_input]
     );
 
     if (resultUser.rows.length > 0) {
