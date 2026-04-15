@@ -44,6 +44,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { invoice_id, monto, metodo, referencia, notas } = req.body;
+    const vendedor_nombre = req.user?.nombre || null;
 
     if (!invoice_id) return res.status(400).json({ success: false, mensaje: 'invoice_id es requerido' });
     if (!monto) return res.status(400).json({ success: false, mensaje: 'El monto es requerido' });
@@ -65,9 +66,9 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
 
     // Registrar pago
     const payment = await client.query(
-      `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null]
+      `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas, vendedor_nombre, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente') RETURNING *`,
+      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre]
     );
 
     // Verificar si el pago cubre el total
@@ -163,5 +164,59 @@ router.get('/:id/recibo', async (req, res) => {
     res.status(500).json({ mensaje: error.message })
   }
 })
+
+// GET - Pagos pendientes por confirmar
+router.get('/pendientes', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { fecha_inicio, fecha_fin, vendedor } = req.query;
+
+    let query = `
+      SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre
+      FROM payments p
+      JOIN invoices i ON p.invoice_id = i.id
+      LEFT JOIN customers c ON i.customer_id = c.id
+      WHERE p.tenant_id = $1 AND p.estado = 'pendiente'
+    `;
+    const params = [tenant_id];
+
+    if (fecha_inicio) {
+      params.push(fecha_inicio);
+      query += ` AND DATE(p.creado_en) >= $${params.length}`;
+    }
+    if (fecha_fin) {
+      params.push(fecha_fin);
+      query += ` AND DATE(p.creado_en) <= $${params.length}`;
+    }
+    if (vendedor) {
+      params.push(`%${vendedor}%`);
+      query += ` AND p.vendedor_nombre ILIKE $${params.length}`;
+    }
+
+    query += ` ORDER BY p.creado_en DESC`;
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// PUT - Confirmar pago
+router.put('/:id/confirmar', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE payments SET estado='confirmado', confirmado_en=NOW()
+       WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      [id, tenant_id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Pago no encontrado' });
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
 
 module.exports = router;

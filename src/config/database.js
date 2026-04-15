@@ -157,8 +157,16 @@ const createTables = async () => {
         metodo VARCHAR(30) DEFAULT 'efectivo',
         referencia VARCHAR(100),
         notas TEXT,
+        estado VARCHAR(20) DEFAULT 'confirmado',
+        vendedor_nombre VARCHAR(150),
+        confirmado_en TIMESTAMP,
         creado_en TIMESTAMP DEFAULT NOW()
       )
+    `);
+    await pool.query(`
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'confirmado';
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS vendedor_nombre VARCHAR(150);
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmado_en TIMESTAMP;
     `);
     console.log('✅ Tabla payments creada');
 
