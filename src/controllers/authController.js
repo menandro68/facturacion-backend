@@ -126,7 +126,7 @@ const login = async (req, res) => {
       `SELECT v.*, t.nombre as empresa, t.estado as tenant_estado
        FROM vendedores v
        JOIN tenants t ON v.tenant_id = t.id
-       WHERE v.usuario = $1 AND v.activo = true`,
+       WHERE v.usuario = $1 AND v.estado = 'activo'`,
       [usuario || email]
     );
 
