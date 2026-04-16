@@ -103,6 +103,43 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET - Pagos pendientes por confirmar
+router.get('/pendientes', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { fecha_inicio, fecha_fin, vendedor } = req.query;
+
+    let query = `
+      SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre
+      FROM payments p
+      JOIN invoices i ON p.invoice_id = i.id
+      LEFT JOIN customers c ON i.customer_id = c.id
+      WHERE p.tenant_id = $1 AND (p.estado = 'pendiente' OR p.estado IS NULL)
+    `;
+    const params = [tenant_id];
+
+    if (fecha_inicio) {
+      params.push(fecha_inicio);
+      query += ` AND DATE(p.creado_en) >= $${params.length}`;
+    }
+    if (fecha_fin) {
+      params.push(fecha_fin);
+      query += ` AND DATE(p.creado_en) <= $${params.length}`;
+    }
+    if (vendedor) {
+      params.push(`%${vendedor}%`);
+      query += ` AND p.vendedor_nombre ILIKE $${params.length}`;
+    }
+
+    query += ` ORDER BY p.creado_en DESC`;
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // GET - Recibo de pago PDF
 router.get('/:id/recibo', async (req, res) => {
   try {
@@ -164,43 +201,6 @@ router.get('/:id/recibo', async (req, res) => {
     res.status(500).json({ mensaje: error.message })
   }
 })
-
-// GET - Pagos pendientes por confirmar
-router.get('/pendientes', verifyToken, tenantGuard, async (req, res) => {
-  try {
-    const { tenant_id } = req.user;
-    const { fecha_inicio, fecha_fin, vendedor } = req.query;
-
-    let query = `
-      SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre
-      FROM payments p
-      JOIN invoices i ON p.invoice_id = i.id
-      LEFT JOIN customers c ON i.customer_id = c.id
-      WHERE p.tenant_id = $1 AND p.estado = 'pendiente'
-    `;
-    const params = [tenant_id];
-
-    if (fecha_inicio) {
-      params.push(fecha_inicio);
-      query += ` AND DATE(p.creado_en) >= $${params.length}`;
-    }
-    if (fecha_fin) {
-      params.push(fecha_fin);
-      query += ` AND DATE(p.creado_en) <= $${params.length}`;
-    }
-    if (vendedor) {
-      params.push(`%${vendedor}%`);
-      query += ` AND p.vendedor_nombre ILIKE $${params.length}`;
-    }
-
-    query += ` ORDER BY p.creado_en DESC`;
-
-    const result = await pool.query(query, params);
-    res.json({ success: true, data: result.rows });
-  } catch (error) {
-    res.status(500).json({ success: false, mensaje: error.message });
-  }
-});
 
 // PUT - Confirmar pago
 router.put('/:id/confirmar', verifyToken, tenantGuard, async (req, res) => {
