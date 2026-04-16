@@ -150,7 +150,7 @@ const login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: vendedor.id, tenant_id: vendedor.tenant_id, rol: 'vendedor', vendedor_id: vendedor.id },
+      { id: vendedor.id, tenant_id: vendedor.tenant_id, rol: 'vendedor', vendedor_id: vendedor.id, nombre: vendedor.nombre },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
