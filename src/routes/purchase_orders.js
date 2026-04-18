@@ -196,6 +196,38 @@ router.put('/:id/estado', async (req, res) => {
   }
 })
 
+// PUT pagar orden de compra
+router.put('/:id/pagar', async (req, res) => {
+  const client = await pool.connect()
+  try {
+    const { monto, metodo, notas } = req.body
+    const { tenant_id } = req.user
+    const { id } = req.params
+
+    const orden = await client.query(
+      'SELECT * FROM purchase_orders WHERE id=$1 AND tenant_id=$2',
+      [id, tenant_id]
+    )
+    if (!orden.rows[0]) return res.status(404).json({ mensaje: 'Orden no encontrada' })
+
+    const o = orden.rows[0]
+    const nuevoPagado = parseFloat(o.monto_pagado || 0) + parseFloat(monto)
+    const total = parseFloat(o.total)
+    const estadoPago = nuevoPagado >= total ? 'pagada' : 'parcial'
+
+    await client.query(
+      'UPDATE purchase_orders SET monto_pagado=$1, estado_pago=$2 WHERE id=$3 AND tenant_id=$4',
+      [nuevoPagado, estadoPago, id, tenant_id]
+    )
+
+    res.json({ success: true, mensaje: 'Pago registrado', monto_pagado: nuevoPagado, estado_pago: estadoPago })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  } finally {
+    client.release()
+  }
+})
+
 // DELETE eliminar orden
 router.delete('/:id', async (req, res) => {
   try {

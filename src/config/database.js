@@ -323,8 +323,14 @@ const createTables = async () => {
         estado VARCHAR(20) DEFAULT 'pendiente',
         notas TEXT,
         total DECIMAL(12,2) DEFAULT 0,
+        monto_pagado DECIMAL(12,2) DEFAULT 0,
+        estado_pago VARCHAR(20) DEFAULT 'pendiente',
         creado_en TIMESTAMP DEFAULT NOW()
       )
+    `);
+    await pool.query(`
+      ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS monto_pagado DECIMAL(12,2) DEFAULT 0;
+      ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS estado_pago VARCHAR(20) DEFAULT 'pendiente';
     `);
     console.log('✅ Tabla purchase_orders creada');
 
