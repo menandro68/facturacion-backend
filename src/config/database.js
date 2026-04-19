@@ -348,6 +348,26 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla purchase_order_items creada');
 
+    // Tabla historial de pagos de órdenes de compra
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS purchase_order_payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        monto DECIMAL(12,2) NOT NULL,
+        metodo VARCHAR(30) DEFAULT 'efectivo',
+        notas TEXT,
+        fecha_pago TIMESTAMP DEFAULT NOW(),
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_po_payments_tenant ON purchase_order_payments(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_po_payments_order ON purchase_order_payments(order_id);
+      CREATE INDEX IF NOT EXISTS idx_po_payments_fecha ON purchase_order_payments(fecha_pago);
+    `);
+    console.log('✅ Tabla purchase_order_payments creada');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);

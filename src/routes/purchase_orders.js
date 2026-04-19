@@ -200,6 +200,7 @@ router.put('/:id/estado', async (req, res) => {
 router.put('/:id/pagar', async (req, res) => {
   const client = await pool.connect()
   try {
+    await client.query('BEGIN')
     const { monto, metodo, notas } = req.body
     const { tenant_id } = req.user
     const { id } = req.params
@@ -208,20 +209,33 @@ router.put('/:id/pagar', async (req, res) => {
       'SELECT * FROM purchase_orders WHERE id=$1 AND tenant_id=$2',
       [id, tenant_id]
     )
-    if (!orden.rows[0]) return res.status(404).json({ mensaje: 'Orden no encontrada' })
+    if (!orden.rows[0]) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ mensaje: 'Orden no encontrada' })
+    }
 
     const o = orden.rows[0]
     const nuevoPagado = parseFloat(o.monto_pagado || 0) + parseFloat(monto)
     const total = parseFloat(o.total)
     const estadoPago = nuevoPagado >= total ? 'pagada' : 'parcial'
 
+    // Actualizar orden
     await client.query(
       'UPDATE purchase_orders SET monto_pagado=$1, estado_pago=$2 WHERE id=$3 AND tenant_id=$4',
       [nuevoPagado, estadoPago, id, tenant_id]
     )
 
+    // Registrar pago en el historial
+    await client.query(
+      `INSERT INTO purchase_order_payments (tenant_id, order_id, monto, metodo, notas, fecha_pago)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [tenant_id, id, parseFloat(monto), metodo || 'efectivo', notas || null]
+    )
+
+    await client.query('COMMIT')
     res.json({ success: true, mensaje: 'Pago registrado', monto_pagado: nuevoPagado, estado_pago: estadoPago })
   } catch (err) {
+    await client.query('ROLLBACK')
     res.status(500).json({ mensaje: err.message })
   } finally {
     client.release()
@@ -236,6 +250,34 @@ router.delete('/:id', async (req, res) => {
       [req.params.id, req.user.tenant_id]
     )
     res.json({ mensaje: 'Orden eliminada' })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
+// GET historial de todos los pagos del tenant
+router.get('/payments/all', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        pop.id,
+        pop.order_id,
+        pop.monto,
+        pop.metodo,
+        pop.notas,
+        pop.fecha_pago,
+        po.numero as orden_numero,
+        po.total as orden_total,
+        po.monto_pagado as orden_pagado,
+        po.estado_pago as orden_estado_pago,
+        s.nombre as proveedor_nombre
+      FROM purchase_order_payments pop
+      JOIN purchase_orders po ON pop.order_id = po.id
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      WHERE pop.tenant_id = $1
+      ORDER BY pop.fecha_pago DESC
+    `, [req.user.tenant_id])
+    res.json({ data: result.rows })
   } catch (err) {
     res.status(500).json({ mensaje: err.message })
   }
