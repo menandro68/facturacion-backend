@@ -62,7 +62,7 @@ router.get('/:id', async (req, res) => {
 
 // POST crear orden
 router.post('/', async (req, res) => {
-  const { supplier_id, fecha_entrega, notas, items } = req.body
+  const { supplier_id, fecha_entrega, fecha_vencimiento_pago, notas, items } = req.body
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -72,9 +72,9 @@ router.post('/', async (req, res) => {
     const numero = `OC-${String(parseInt(count.rows[0].count) + 1).padStart(4, '0')}`
     const total = items.reduce((sum, i) => sum + (i.cantidad * i.precio_unitario), 0)
     const orden = await client.query(`
-      INSERT INTO purchase_orders (tenant_id, numero, supplier_id, fecha_entrega, notas, total)
-      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
-    `, [req.user.tenant_id, numero, supplier_id || null, fecha_entrega || null, notas || '', total])
+      INSERT INTO purchase_orders (tenant_id, numero, supplier_id, fecha_entrega, fecha_vencimiento_pago, notas, total)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
+    `, [req.user.tenant_id, numero, supplier_id || null, fecha_entrega || null, fecha_vencimiento_pago || null, notas || '', total])
 
     for (const item of items) {
       const subtotal = item.cantidad * item.precio_unitario
@@ -95,14 +95,14 @@ router.post('/', async (req, res) => {
 
 // PUT editar orden
 router.put('/:id/editar', async (req, res) => {
-  const { supplier_id, fecha_entrega, notas, items } = req.body
+  const { supplier_id, fecha_entrega, fecha_vencimiento_pago, notas, items } = req.body
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     const total = items ? items.reduce((sum, i) => sum + (i.cantidad * i.precio_unitario), 0) : 0
     await client.query(
-      'UPDATE purchase_orders SET supplier_id = $1, fecha_entrega = $2, notas = $3, total = $4 WHERE id = $5 AND tenant_id = $6',
-      [supplier_id || null, fecha_entrega || null, notas || '', total, req.params.id, req.user.tenant_id]
+      'UPDATE purchase_orders SET supplier_id = $1, fecha_entrega = $2, fecha_vencimiento_pago = $3, notas = $4, total = $5 WHERE id = $6 AND tenant_id = $7',
+      [supplier_id || null, fecha_entrega || null, fecha_vencimiento_pago || null, notas || '', total, req.params.id, req.user.tenant_id]
     )
     if (items && items.length > 0) {
       await client.query('DELETE FROM purchase_order_items WHERE order_id = $1', [req.params.id])

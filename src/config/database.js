@@ -331,6 +331,7 @@ const createTables = async () => {
     await pool.query(`
       ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS monto_pagado DECIMAL(12,2) DEFAULT 0;
       ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS estado_pago VARCHAR(20) DEFAULT 'pendiente';
+      ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS fecha_vencimiento_pago DATE;
     `);
     console.log('✅ Tabla purchase_orders creada');
 
