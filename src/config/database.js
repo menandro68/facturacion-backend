@@ -368,6 +368,25 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla purchase_order_payments creada');
 
+    // Tabla configuracion_sistema (clave de descuentos y otras configuraciones futuras)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracion_sistema (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        clave VARCHAR(100) NOT NULL,
+        valor TEXT,
+        descripcion VARCHAR(255),
+        creado_en TIMESTAMP DEFAULT NOW(),
+        actualizado_en TIMESTAMP DEFAULT NOW(),
+        UNIQUE(tenant_id, clave)
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_config_tenant ON configuracion_sistema(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_config_clave ON configuracion_sistema(clave);
+    `);
+    console.log('✅ Tabla configuracion_sistema creada');
+
     // Tabla devoluciones (encabezado) - Flujo profesional: almacen registra -> contabilidad aprueba -> NC generada
     await pool.query(`
       CREATE TABLE IF NOT EXISTS devoluciones (
