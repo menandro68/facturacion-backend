@@ -368,6 +368,25 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla purchase_order_payments creada');
 
+    // Tabla de operadores (personal de oficina con permisos por módulo)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS operadores (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        nombre VARCHAR(100) NOT NULL,
+        username VARCHAR(50) NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        activo BOOLEAN DEFAULT true,
+        modulos_permitidos TEXT DEFAULT '[]',
+        creado_en TIMESTAMP DEFAULT NOW(),
+        actualizado_en TIMESTAMP DEFAULT NOW(),
+        UNIQUE(tenant_id, username)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_operadores_tenant ON operadores(tenant_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_operadores_username ON operadores(username)`);
+    console.log('✅ Tabla operadores creada');
+
     // Tabla configuracion_sistema (clave de descuentos y otras configuraciones futuras)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS configuracion_sistema (
