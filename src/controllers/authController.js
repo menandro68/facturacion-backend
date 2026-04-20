@@ -121,7 +121,62 @@ const login = async (req, res) => {
       });
     }
 
-    // ── 2. Buscar en vendedores ──
+    // ── 2. Buscar en operadores ──
+    const resultOperador = await pool.query(
+      `SELECT o.*, t.nombre as empresa, t.estado as tenant_estado
+       FROM operadores o
+       JOIN tenants t ON o.tenant_id = t.id
+       WHERE o.username = $1 AND o.activo = true`,
+      [(usuario || email || '').toLowerCase().trim()]
+    );
+
+    if (resultOperador.rows.length > 0) {
+      const operador = resultOperador.rows[0];
+
+      if (operador.tenant_estado !== 'activo') {
+        return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
+      }
+
+      const passwordValido = await bcrypt.compare(password, operador.password);
+      if (!passwordValido) {
+        return res.status(401).json({ mensaje: 'Credenciales incorrectas' });
+      }
+
+      let modulosPermitidos = [];
+      try {
+        modulosPermitidos = JSON.parse(operador.modulos_permitidos || '[]');
+      } catch (e) {
+        modulosPermitidos = [];
+      }
+
+      const token = jwt.sign(
+        {
+          id: operador.id,
+          tenant_id: operador.tenant_id,
+          rol: 'operador',
+          operador_id: operador.id,
+          nombre: operador.nombre,
+          modulos_permitidos: modulosPermitidos
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN }
+      );
+
+      return res.json({
+        mensaje: 'Login exitoso ✅',
+        token,
+        usuario: {
+          id: operador.id,
+          nombre: operador.nombre,
+          username: operador.username,
+          rol: 'operador',
+          empresa: operador.empresa,
+          modulos_permitidos: modulosPermitidos
+        }
+      });
+    }
+
+    // ── 3. Buscar en vendedores ──
     const resultVendedor = await pool.query(
       `SELECT v.*, t.nombre as empresa, t.estado as tenant_estado
        FROM vendedores v
