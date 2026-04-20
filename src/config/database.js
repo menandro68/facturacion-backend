@@ -368,6 +368,59 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla purchase_order_payments creada');
 
+    // Tabla devoluciones (encabezado) - Flujo profesional: almacen registra -> contabilidad aprueba -> NC generada
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS devoluciones (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        numero VARCHAR(20) NOT NULL,
+        factura_id UUID REFERENCES invoices(id),
+        factura_ncf VARCHAR(20),
+        customer_id UUID REFERENCES customers(id),
+        cliente_nombre VARCHAR(150),
+        motivo TEXT,
+        estado VARCHAR(20) DEFAULT 'pendiente',
+        subtotal DECIMAL(12,2) DEFAULT 0,
+        itbis DECIMAL(12,2) DEFAULT 0,
+        total DECIMAL(12,2) DEFAULT 0,
+        nota_credito_id UUID REFERENCES invoices(id),
+        creado_por VARCHAR(150),
+        aprobada_por VARCHAR(150),
+        procesada_por VARCHAR(150),
+        cancelada_por VARCHAR(150),
+        aprobada_en TIMESTAMP,
+        procesada_en TIMESTAMP,
+        cancelada_en TIMESTAMP,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_devoluciones_tenant ON devoluciones(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_devoluciones_factura ON devoluciones(factura_id);
+      CREATE INDEX IF NOT EXISTS idx_devoluciones_customer ON devoluciones(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_devoluciones_estado ON devoluciones(estado);
+      CREATE INDEX IF NOT EXISTS idx_devoluciones_creado ON devoluciones(creado_en);
+    `);
+    console.log('✅ Tabla devoluciones creada');
+
+    // Tabla items de devoluciones
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS devoluciones_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        devolucion_id UUID NOT NULL REFERENCES devoluciones(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id),
+        descripcion VARCHAR(255) NOT NULL,
+        cantidad DECIMAL(12,2) NOT NULL,
+        precio_unitario DECIMAL(12,2) NOT NULL,
+        itbis_rate DECIMAL(5,2) DEFAULT 18.00,
+        subtotal DECIMAL(12,2) DEFAULT 0
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_dev_items_devolucion ON devoluciones_items(devolucion_id);
+    `);
+    console.log('✅ Tabla devoluciones_items creada');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);
