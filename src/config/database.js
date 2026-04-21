@@ -459,6 +459,29 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla devoluciones_items creada');
 
+    // Tabla ncf_secuencias_electronicas (E31, E32, E34 - Factura Electrónica DGII)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ncf_secuencias_electronicas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        tipo_ncf VARCHAR(3) NOT NULL,
+        prefijo VARCHAR(3) NOT NULL,
+        secuencia_desde BIGINT NOT NULL DEFAULT 1,
+        secuencia_hasta BIGINT NOT NULL DEFAULT 1000,
+        secuencia_actual BIGINT NOT NULL DEFAULT 1,
+        fecha_vencimiento DATE NOT NULL,
+        activo BOOLEAN DEFAULT true,
+        creado_en TIMESTAMP DEFAULT NOW(),
+        actualizado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ncf_elec_tenant ON ncf_secuencias_electronicas(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_ncf_elec_tipo ON ncf_secuencias_electronicas(tipo_ncf);
+      CREATE INDEX IF NOT EXISTS idx_ncf_elec_activo ON ncf_secuencias_electronicas(activo);
+    `);
+    console.log('✅ Tabla ncf_secuencias_electronicas creada');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);
