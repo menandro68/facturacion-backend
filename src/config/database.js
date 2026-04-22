@@ -482,6 +482,16 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla ncf_secuencias_electronicas creada');
 
+    // Agregar columnas de Facturacion Electronica (e-CF) a la tabla invoices
+    await pool.query(`
+      ALTER TABLE invoices
+        ADD COLUMN IF NOT EXISTS codigo_seguridad VARCHAR(10),
+        ADD COLUMN IF NOT EXISTS fecha_vencimiento_encf DATE,
+        ADD COLUMN IF NOT EXISTS fecha_firma_digital TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS qr_data TEXT
+    `);
+    console.log('Columnas e-CF agregadas a invoices');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);
