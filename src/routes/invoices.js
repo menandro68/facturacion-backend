@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
 const { obtenerProximoNCFElectronico } = require('../helpers/ncfElectronico');
+const QRCode = require('qrcode');
 
 // GET - Listar facturas
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -646,6 +647,14 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     // Media carta: 5.5 x 8.5 pulgadas = 396 x 612 puntos
     const doc = new PDFDocument({ margin: 30, size: [396, 612] });
 
+    // Detectar si es e-CF (Factura Electronica DGII)
+    const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
+    const tituloDocumento = {
+      'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
+      'E32': 'FACTURA CONSUMO ELECTRONICA',
+      'E34': 'NOTA DE CREDITO ELECTRONICA'
+    }[data.ncf_tipo] || 'FACTURA';
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
@@ -666,7 +675,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.fontSize(8).text(data.empresa_email || '', M, 47, { width: col });
 
     // Número de factura (derecha)
-    doc.fontSize(9).font('Helvetica-Bold').text('FACTURA', M, 15, { width: col, align: 'right' });
+    doc.fontSize(esElectronica ? 7 : 9).font('Helvetica-Bold').text(tituloDocumento, M, 15, { width: col, align: 'right' });
     doc.fontSize(8).font('Helvetica').text(`NCF: ${data.ncf || 'N/A'}`, M, 28, { width: col, align: 'right' });
     doc.fontSize(7).text(`Estado: ${data.estado.toUpperCase()}`, M, 40, { width: col, align: 'right' });
     doc.fontSize(7).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, M, 52, { width: col, align: 'right' });
@@ -744,6 +753,43 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
        .text('TOTAL:', tx + 4, y + 4)
        .text(`RD$${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 4, { width: tw - 4, align: 'right' });
     y += 26;
+
+    // === BLOQUE e-CF (Solo facturas electronicas DGII) ===
+    if (esElectronica) {
+      y += 4;
+
+      // Generar QR con datos DGII
+      const qrData = `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=${data.empresa_rnc || ''}&ENCF=${data.ncf || ''}&MontoTotal=${parseFloat(data.total).toFixed(2)}&FechaEmision=${data.fecha_emision ? new Date(data.fecha_emision).toISOString().split('T')[0] : ''}&CodigoSeguridad=${data.codigo_seguridad || ''}`;
+
+      try {
+        const qrPng = await QRCode.toBuffer(qrData, { width: 90, margin: 1 });
+
+        // Dibujar QR a la izquierda
+        doc.image(qrPng, M, y, { width: 75, height: 75 });
+
+        // Datos DGII a la derecha del QR
+        const infoX = M + 85;
+        doc.fillColor('#1E40AF').fontSize(7).font('Helvetica-Bold')
+           .text('VALIDACION DGII (e-CF)', infoX, y);
+        doc.fillColor('#1E293B').fontSize(6).font('Helvetica')
+           .text(`eNCF: ${data.ncf || '-'}`, infoX, y + 11)
+           .text(`Codigo Seguridad: ${data.codigo_seguridad || '-'}`, infoX, y + 21)
+           .text(`Fecha Firma: ${data.fecha_firma_digital ? new Date(data.fecha_firma_digital).toLocaleString('es-DO') : '-'}`, infoX, y + 31)
+           .text(`Vence eNCF: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, infoX, y + 41)
+           .text('Escanee el QR para validar en DGII', infoX, y + 55, { width: col - 90 });
+
+        y += 80;
+      } catch (qrError) {
+        // Si falla el QR, continuar sin el
+        doc.fillColor('#EF4444').fontSize(6).text('Error generando QR', M, y);
+        y += 10;
+      }
+
+      // Leyenda DGII obligatoria
+      doc.fillColor('#475569').fontSize(6).font('Helvetica-Oblique')
+         .text('Representacion Impresa del e-CF (Comprobante Fiscal Electronico)', M, y, { width: col, align: 'center' });
+      y += 8;
+    }
 
     // === FOOTER ===
     doc.moveTo(M, y).lineTo(M + col, y).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
