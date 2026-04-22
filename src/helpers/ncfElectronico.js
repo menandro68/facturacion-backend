@@ -31,10 +31,15 @@ function generarCodigoSeguridad() {
  * @returns {Object} { ncf, codigo_seguridad, fecha_vencimiento, secuencia_id }
  */
 async function obtenerProximoNCFElectronico(tenant_id, tipo_ncf) {
-  // Validar tipo_ncf
-  if (!['E31', 'E32', 'E34'].includes(tipo_ncf)) {
-    throw new Error(`Tipo NCF invalido: ${tipo_ncf}. Debe ser E31, E32 o E34`);
+  // Validar tipo_ncf (acepta tradicionales y electronicos)
+  const tiposValidos = ['B01', 'B02', 'B15', 'E31', 'E32', 'E34'];
+  if (!tiposValidos.includes(tipo_ncf)) {
+    throw new Error(`Tipo NCF invalido: ${tipo_ncf}. Debe ser B01, B02, B15, E31, E32 o E34`);
   }
+
+  // Determinar si es electronico o tradicional
+  const esElectronico = ['E31', 'E32', 'E34'].includes(tipo_ncf);
+  const longitudSecuencia = esElectronico ? 10 : 8; // e-CF: 10 digitos, tradicional: 8 digitos
 
   const client = await pool.connect();
 
@@ -61,19 +66,23 @@ async function obtenerProximoNCFElectronico(tenant_id, tipo_ncf) {
 
     const secuencia = secuenciaResult.rows[0];
 
-    // 2. Verificar que no este vencida
-    const hoy = new Date();
-    const fechaVenc = new Date(secuencia.fecha_vencimiento);
-    if (fechaVenc < hoy) {
-      throw new Error(`La secuencia ${tipo_ncf} esta vencida (${fechaVenc.toLocaleDateString('es-DO')}). Cree una nueva secuencia`);
+    // 2. Verificar vencimiento (obligatorio para e-CF, opcional para tradicionales)
+    if (secuencia.fecha_vencimiento) {
+      const hoy = new Date();
+      const fechaVenc = new Date(secuencia.fecha_vencimiento);
+      if (fechaVenc < hoy) {
+        throw new Error(`La secuencia ${tipo_ncf} esta vencida (${fechaVenc.toLocaleDateString('es-DO')}). Cree una nueva secuencia`);
+      }
+    } else if (esElectronico) {
+      throw new Error(`La secuencia ${tipo_ncf} no tiene fecha de vencimiento (obligatoria para e-CF)`);
     }
 
-    // 3. Generar el NCF formateado (ej: E310000000001)
+    // 3. Generar el NCF formateado (e-CF: 10 digitos, tradicional: 8 digitos)
     const numeroActual = secuencia.secuencia_actual;
-    const ncfFormateado = `${secuencia.prefijo}${String(numeroActual).padStart(10, '0')}`;
+    const ncfFormateado = `${secuencia.prefijo}${String(numeroActual).padStart(longitudSecuencia, '0')}`;
 
-    // 4. Generar codigo de seguridad unico
-    const codigoSeguridad = generarCodigoSeguridad();
+    // 4. Generar codigo de seguridad (solo para e-CF, null para tradicionales)
+    const codigoSeguridad = esElectronico ? generarCodigoSeguridad() : null;
 
     // 5. Incrementar contador +1 para la proxima factura
     await client.query(

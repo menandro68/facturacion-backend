@@ -460,28 +460,47 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       codigo_seguridad = encfResult.codigo_seguridad;
       fecha_vencimiento_encf = encfResult.fecha_vencimiento;
     } else {
-      // NCF TRADICIONAL (B01, B02, etc.) - Logica original sin cambios
-      let seq = await client.query(
-        `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2 AND estado = 'activo'`,
-        [tenant_id, ncf_tipo || 'B01']
+      // NCF TRADICIONAL (B01, B02, B15) - Logica inteligente de 2 niveles
+      const tipoTradicional = ncf_tipo || 'B01';
+
+      // NIVEL 1: Buscar si existe secuencia configurada en tabla NUEVA (Mantenimiento)
+      const secuenciaNueva = await client.query(
+        `SELECT id FROM ncf_secuencias_electronicas
+         WHERE tenant_id = $1 AND tipo_ncf = $2 AND activo = true
+           AND secuencia_actual <= secuencia_hasta
+         LIMIT 1`,
+        [tenant_id, tipoTradicional]
       );
-      if (seq.rows.length === 0) {
+
+      if (secuenciaNueva.rows.length > 0) {
+        // Existe secuencia en tabla nueva - usar helper unificado
+        const resultado = await obtenerProximoNCFElectronico(tenant_id, tipoTradicional);
+        ncf = resultado.ncf;
+        // codigo_seguridad y fecha_vencimiento_encf se quedan null (son solo para e-CF)
+      } else {
+        // NIVEL 2: No existe en tabla nueva - usar logica VIEJA (sin cambios)
+        let seq = await client.query(
+          `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2 AND estado = 'activo'`,
+          [tenant_id, tipoTradicional]
+        );
+        if (seq.rows.length === 0) {
+          await client.query(
+            `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max)
+             VALUES ($1, $2, $3, 0, 9999999)`,
+            [tenant_id, tipoTradicional, tipoTradicional]
+          );
+          seq = await client.query(
+            `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2`,
+            [tenant_id, tipoTradicional]
+          );
+        }
+        const nueva_secuencia = seq.rows[0].secuencia_actual + 1;
         await client.query(
-          `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max)
-           VALUES ($1, $2, $3, 0, 9999999)`,
-          [tenant_id, ncf_tipo || 'B01', ncf_tipo || 'B01']
+          `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
+          [nueva_secuencia, seq.rows[0].id]
         );
-        seq = await client.query(
-          `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2`,
-          [tenant_id, ncf_tipo || 'B01']
-        );
+        ncf = `${tipoTradicional}${String(nueva_secuencia).padStart(8, '0')}`;
       }
-      const nueva_secuencia = seq.rows[0].secuencia_actual + 1;
-      await client.query(
-        `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
-        [nueva_secuencia, seq.rows[0].id]
-      );
-      ncf = `${ncf_tipo || 'B01'}${String(nueva_secuencia).padStart(8, '0')}`;
     }
 
     const invoice = await client.query(

@@ -313,24 +313,30 @@ router.post('/ncf-electronicas', verifyToken, tenantGuard, async (req, res) => {
 
     // Validaciones
     if (!tipo_ncf) return res.status(400).json({ success: false, mensaje: 'El tipo de NCF es requerido' });
-    if (!['E31', 'E32', 'E34'].includes(tipo_ncf)) {
-      return res.status(400).json({ success: false, mensaje: 'Tipo NCF debe ser E31, E32 o E34' });
+
+    const tiposValidos = ['B01', 'B02', 'B15', 'E31', 'E32', 'E34'];
+    if (!tiposValidos.includes(tipo_ncf)) {
+      return res.status(400).json({ success: false, mensaje: 'Tipo NCF debe ser B01, B02, B15, E31, E32 o E34' });
     }
+
+    const esElectronico = ['E31', 'E32', 'E34'].includes(tipo_ncf);
+
     if (!secuencia_desde || !secuencia_hasta) {
       return res.status(400).json({ success: false, mensaje: 'Secuencia desde y hasta son requeridos' });
     }
     if (parseInt(secuencia_desde) >= parseInt(secuencia_hasta)) {
       return res.status(400).json({ success: false, mensaje: 'Secuencia desde debe ser menor a hasta' });
     }
-    if (!fecha_vencimiento) {
-      return res.status(400).json({ success: false, mensaje: 'La fecha de vencimiento es requerida' });
+    // Fecha de vencimiento: obligatoria para e-CF, opcional para tradicionales
+    if (esElectronico && !fecha_vencimiento) {
+      return res.status(400).json({ success: false, mensaje: 'La fecha de vencimiento es requerida para NCF electronicos (E31, E32, E34)' });
     }
 
     const result = await pool.query(
       `INSERT INTO ncf_secuencias_electronicas 
        (tenant_id, tipo_ncf, prefijo, secuencia_desde, secuencia_hasta, secuencia_actual, fecha_vencimiento, activo)
        VALUES ($1, $2, $3, $4, $5, $6, $7, true) RETURNING *`,
-      [tenant_id, tipo_ncf, tipo_ncf, secuencia_desde, secuencia_hasta, secuencia_desde, fecha_vencimiento]
+      [tenant_id, tipo_ncf, tipo_ncf, secuencia_desde, secuencia_hasta, secuencia_desde, fecha_vencimiento || null]
     );
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
@@ -345,8 +351,9 @@ router.put('/ncf-electronicas/:id', verifyToken, tenantGuard, async (req, res) =
     const { id } = req.params;
     const { tipo_ncf, secuencia_desde, secuencia_hasta, fecha_vencimiento, activo } = req.body;
 
-    if (!['E31', 'E32', 'E34'].includes(tipo_ncf)) {
-      return res.status(400).json({ success: false, mensaje: 'Tipo NCF debe ser E31, E32 o E34' });
+    const tiposValidos = ['B01', 'B02', 'B15', 'E31', 'E32', 'E34'];
+    if (!tiposValidos.includes(tipo_ncf)) {
+      return res.status(400).json({ success: false, mensaje: 'Tipo NCF debe ser B01, B02, B15, E31, E32 o E34' });
     }
 
     const result = await pool.query(
@@ -354,7 +361,7 @@ router.put('/ncf-electronicas/:id', verifyToken, tenantGuard, async (req, res) =
        SET tipo_ncf=$1, prefijo=$2, secuencia_desde=$3, secuencia_hasta=$4, 
            fecha_vencimiento=$5, activo=$6, actualizado_en=NOW()
        WHERE id=$7 AND tenant_id=$8 RETURNING *`,
-      [tipo_ncf, tipo_ncf, secuencia_desde, secuencia_hasta, fecha_vencimiento, activo !== false, id, tenant_id]
+      [tipo_ncf, tipo_ncf, secuencia_desde, secuencia_hasta, fecha_vencimiento || null, activo !== false, id, tenant_id]
     );
     
     if (result.rows.length === 0) {
