@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const { obtenerProximoNCFElectronico } = require('../helpers/ncfElectronico');
 
 // GET - Listar facturas
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -446,28 +447,41 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     }
     const total = subtotal + itbis;
 
-    // Asignar NCF automáticamente
-    let seq = await client.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2 AND estado = 'activo'`,
-      [tenant_id, ncf_tipo || 'B01']
-    );
-    if (seq.rows.length === 0) {
-      await client.query(
-        `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max)
-         VALUES ($1, $2, $3, 0, 9999999)`,
-        [tenant_id, ncf_tipo || 'B01', ncf_tipo || 'B01']
-      );
-      seq = await client.query(
-        `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2`,
+    // Detectar si es NCF Electronico (e-CF) o tradicional (B01/B02)
+    let ncf;
+    let codigo_seguridad = null;
+    let fecha_vencimiento_encf = null;
+
+    if (['E31', 'E32', 'E34'].includes(ncf_tipo)) {
+      // NCF ELECTRONICO (e-CF) - Facturacion Electronica DGII
+      const encfResult = await obtenerProximoNCFElectronico(tenant_id, ncf_tipo);
+      ncf = encfResult.ncf;
+      codigo_seguridad = encfResult.codigo_seguridad;
+      fecha_vencimiento_encf = encfResult.fecha_vencimiento;
+    } else {
+      // NCF TRADICIONAL (B01, B02, etc.) - Logica original sin cambios
+      let seq = await client.query(
+        `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2 AND estado = 'activo'`,
         [tenant_id, ncf_tipo || 'B01']
       );
+      if (seq.rows.length === 0) {
+        await client.query(
+          `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max)
+           VALUES ($1, $2, $3, 0, 9999999)`,
+          [tenant_id, ncf_tipo || 'B01', ncf_tipo || 'B01']
+        );
+        seq = await client.query(
+          `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = $2`,
+          [tenant_id, ncf_tipo || 'B01']
+        );
+      }
+      const nueva_secuencia = seq.rows[0].secuencia_actual + 1;
+      await client.query(
+        `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
+        [nueva_secuencia, seq.rows[0].id]
+      );
+      ncf = `${ncf_tipo || 'B01'}${String(nueva_secuencia).padStart(8, '0')}`;
     }
-    const nueva_secuencia = seq.rows[0].secuencia_actual + 1;
-    await client.query(
-      `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
-      [nueva_secuencia, seq.rows[0].id]
-    );
-    const ncf = `${ncf_tipo || 'B01'}${String(nueva_secuencia).padStart(8, '0')}`;
 
     const invoice = await client.query(
       `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision) 
