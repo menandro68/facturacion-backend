@@ -6,6 +6,26 @@ const tenantGuard = require('../middleware/tenantGuard');
 const { obtenerProximoNCFElectronico } = require('../helpers/ncfElectronico');
 const QRCode = require('qrcode');
 
+// GET - Listar items de todas las facturas con comision del producto
+router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const result = await pool.query(
+      `SELECT ii.invoice_id, ii.product_id, ii.descripcion, ii.cantidad, 
+              ii.precio_unitario, ii.subtotal, ii.total,
+              COALESCE(p.comision_vendedor, 0) as comision_vendedor
+       FROM invoice_items ii
+       LEFT JOIN products p ON ii.product_id = p.id
+       INNER JOIN invoices i ON ii.invoice_id = i.id
+       WHERE i.tenant_id = $1`,
+      [tenant_id]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // GET - Listar facturas
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
