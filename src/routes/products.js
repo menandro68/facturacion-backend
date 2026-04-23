@@ -95,16 +95,46 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// DELETE - Eliminar producto (soft delete)
+// DELETE - Eliminar producto (soft delete) - VALIDA QUE NO TENGA STOCK
 router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
+
+    // 1. Verificar que el producto existe
+    const productoResult = await pool.query(
+      `SELECT nombre FROM products WHERE id = $1 AND tenant_id = $2`,
+      [id, tenant_id]
+    );
+    if (productoResult.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Articulo no encontrado' });
+    }
+    const nombreProducto = productoResult.rows[0].nombre;
+
+    // 2. Verificar si tiene stock en inventario
+    const stockResult = await pool.query(
+      `SELECT COALESCE(SUM(stock_actual), 0) as stock_total
+       FROM inventory 
+       WHERE product_id = $1 AND tenant_id = $2`,
+      [id, tenant_id]
+    );
+    const stockTotal = parseFloat(stockResult.rows[0].stock_total);
+
+    // 3. Si tiene stock, rechazar eliminacion
+    if (stockTotal > 0) {
+      return res.status(400).json({
+        success: false,
+        mensaje: `No se puede eliminar el articulo "${nombreProducto}". Tiene ${stockTotal.toLocaleString('es-DO')} unidad(es) en stock. Debe agotar el inventario antes de eliminar.`,
+        stock_actual: stockTotal
+      });
+    }
+
+    // 4. Si no tiene stock, eliminar (soft delete)
     await pool.query(
       `UPDATE products SET estado='inactivo', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
     );
-    res.json({ success: true, mensaje: 'Producto eliminado correctamente' });
+    res.json({ success: true, mensaje: 'Articulo eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
   }
