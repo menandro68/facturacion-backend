@@ -75,8 +75,7 @@ app.get('/{*path}', (req, res) => {
       !req.path.startsWith('/suppliers') && !req.path.startsWith('/inventory') &&
       !req.path.startsWith('/accounts') && !req.path.startsWith('/mantenimiento') &&
       !req.path.startsWith('/purchase') && !req.path.startsWith('/tenant') &&
-      !req.path.startsWith('/devoluciones') && !req.path.startsWith('/operadores') &&
-      !req.path.startsWith('/super-admin') &&
+   !req.path.startsWith('/devoluciones') && !req.path.startsWith('/operadores') &&
       !req.path.startsWith('/db-test')) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.setHeader('Pragma', 'no-cache')
