@@ -482,6 +482,28 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla ncf_secuencias_electronicas creada');
 
+    // Tabla admin_users (usuarios super-admin que controlan todos los tenants)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        nombre VARCHAR(100),
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla admin_users creada');
+
+    // Crear usuario super-admin por defecto si no existe
+    const bcrypt = require('bcryptjs');
+    const hashAdmin = await bcrypt.hash('132312ml', 10);
+    await pool.query(`
+      INSERT INTO admin_users (username, password, nombre)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (username) DO NOTHING
+    `, ['menandro68', hashAdmin, 'Super Administrador']);
+    console.log('✅ Usuario super-admin verificado');
+
     // Agregar columnas de Facturacion Electronica (e-CF) a la tabla invoices
     await pool.query(`
       ALTER TABLE invoices
