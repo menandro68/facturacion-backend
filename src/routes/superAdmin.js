@@ -134,4 +134,21 @@ router.put('/tenants/:id', verifySuperAdmin, async (req, res) => {
   }
 });
 
-module.exports = router;
+// DELETE - Eliminar tenant (con todos sus datos)
+router.delete('/tenants/:id', verifySuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `DELETE FROM tenants WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Tenant no encontrado' });
+    }
+    res.json({ success: true, mensaje: 'Empresa eliminada correctamente' });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+module.exports = router;  
