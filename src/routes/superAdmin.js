@@ -48,12 +48,52 @@ router.get('/tenants', verifySuperAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT t.*, 
-        (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) as total_usuarios,
+        (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) as total_admins,
+        (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id) as total_operadores,
+        (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id) as total_vendedores,
+        (
+          (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) +
+          (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id) +
+          (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id)
+        ) as total_usuarios,
         (SELECT COUNT(*) FROM invoices WHERE tenant_id = t.id) as total_facturas
       FROM tenants t
       ORDER BY t.creado_en DESC
     `);
     res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// GET - Listar usuarios de un tenant especifico (admins + operadores + vendedores)
+router.get('/tenants/:id/usuarios', verifySuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const admins = await pool.query(
+      `SELECT id, nombre, email, rol, creado_en FROM users WHERE tenant_id = $1 ORDER BY creado_en DESC`,
+      [id]
+    );
+    
+    const operadores = await pool.query(
+      `SELECT id, nombre, username, activo, creado_en FROM operadores WHERE tenant_id = $1 ORDER BY creado_en DESC`,
+      [id]
+    );
+    
+    const vendedores = await pool.query(
+      `SELECT id, nombre, cedula, telefono, estado, creado_en FROM vendedores WHERE tenant_id = $1 ORDER BY creado_en DESC`,
+      [id]
+    );
+    
+    res.json({ 
+      success: true, 
+      data: {
+        admins: admins.rows,
+        operadores: operadores.rows,
+        vendedores: vendedores.rows
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
   }
