@@ -658,6 +658,177 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET - Generar PDF formato Punto de Venta 80mm (termica)
+router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+
+    const invoice = await pool.query(
+      `SELECT i.*, c.nombre as cliente_nombre, c.rnc_cedula, c.telefono as cliente_telefono,
+              c.direccion as cliente_direccion,
+              t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.telefono as empresa_telefono,
+              t.direccion as empresa_direccion
+       FROM invoices i
+       LEFT JOIN customers c ON i.customer_id = c.id
+       LEFT JOIN tenants t ON i.tenant_id = t.id
+       WHERE i.id=$1 AND i.tenant_id=$2`,
+      [id, tenant_id]
+    );
+
+    if (invoice.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' });
+    }
+
+    const items = await pool.query(
+      `SELECT * FROM invoice_items WHERE invoice_id=$1`,
+      [id]
+    );
+
+    const data = invoice.rows[0];
+    const PDFDocument = require('pdfkit');
+    
+    // Punto de Venta: 80mm = 227 puntos de ancho, alto dinamico
+    const doc = new PDFDocument({ margin: 8, size: [227, 800] });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=ticket-${data.ncf || data.id}.pdf`);
+    doc.pipe(res);
+
+    const W = 227;
+    let y = 10;
+
+    // ENCABEZADO EMPRESA - Centrado
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.text(data.empresa_nombre || 'EMPRESA', 0, y, { width: W, align: 'center' });
+    y += 14;
+    
+    doc.font('Helvetica').fontSize(7);
+    if (data.empresa_rnc) {
+      doc.text(`RNC: ${data.empresa_rnc}`, 0, y, { width: W, align: 'center' });
+      y += 9;
+    }
+    if (data.empresa_telefono) {
+      doc.text(`Tel: ${data.empresa_telefono}`, 0, y, { width: W, align: 'center' });
+      y += 9;
+    }
+    if (data.empresa_direccion) {
+      doc.text(data.empresa_direccion, 0, y, { width: W, align: 'center' });
+      y += 9;
+    }
+    y += 4;
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 5;
+
+    // TIPO DE DOCUMENTO Y NCF
+    doc.font('Helvetica-Bold').fontSize(9);
+    doc.text('FACTURA', 0, y, { width: W, align: 'center' });
+    y += 11;
+    
+    doc.font('Helvetica').fontSize(8);
+    if (data.ncf) {
+      doc.text(`NCF: ${data.ncf}`, 0, y, { width: W, align: 'center' });
+      y += 10;
+    }
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 5;
+
+    // INFO DE VENTA
+    doc.font('Helvetica').fontSize(7);
+    const fecha = new Date(data.creado_en).toLocaleString('es-DO');
+    doc.text(`Fecha: ${fecha}`, 8, y);
+    y += 9;
+    doc.text(`Cliente: ${data.cliente_nombre || 'Consumidor Final'}`, 8, y, { width: W - 16 });
+    y += 9;
+    if (data.rnc_cedula) {
+      doc.text(`RNC/Ced: ${data.rnc_cedula}`, 8, y);
+      y += 9;
+    }
+    if (data.cliente_telefono) {
+      doc.text(`Tel: ${data.cliente_telefono}`, 8, y);
+      y += 9;
+    }
+    y += 3;
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 5;
+
+    // ITEMS - Encabezado de tabla
+    doc.font('Helvetica-Bold').fontSize(7);
+    doc.text('CANT  DESCRIPCION', 8, y);
+    doc.text('TOTAL', 8, y, { width: W - 16, align: 'right' });
+    y += 10;
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 4;
+
+    // ITEMS - Lista
+    doc.font('Helvetica').fontSize(7);
+    items.rows.forEach(it => {
+      const cant = parseFloat(it.cantidad).toFixed(0);
+      const precio = parseFloat(it.precio_unitario);
+      const subtotal = cant * precio;
+      
+      // Linea 1: Cantidad y descripcion
+      doc.text(`${cant} ${it.descripcion}`, 8, y, { width: W - 16 });
+      y += 9;
+      
+      // Linea 2: Precio unitario y total alineado a la derecha
+      doc.text(`  @ RD$${precio.toLocaleString('es-DO',{minimumFractionDigits:2})}`, 8, y);
+      doc.text(`RD$${subtotal.toLocaleString('es-DO',{minimumFractionDigits:2})}`, 8, y, { width: W - 16, align: 'right' });
+      y += 11;
+    });
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 5;
+
+    // TOTALES
+    doc.font('Helvetica').fontSize(8);
+    doc.text('Subtotal:', 8, y);
+    doc.text(`RD$${parseFloat(data.subtotal).toLocaleString('es-DO',{minimumFractionDigits:2})}`, 8, y, { width: W - 16, align: 'right' });
+    y += 11;
+    
+    doc.text('ITBIS (18%):', 8, y);
+    doc.text(`RD$${parseFloat(data.itbis).toLocaleString('es-DO',{minimumFractionDigits:2})}`, 8, y, { width: W - 16, align: 'right' });
+    y += 11;
+
+    // TOTAL en grande
+    doc.font('Helvetica-Bold').fontSize(11);
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 5;
+    doc.text('TOTAL:', 8, y);
+    doc.text(`RD$${parseFloat(data.total).toLocaleString('es-DO',{minimumFractionDigits:2})}`, 8, y, { width: W - 16, align: 'right' });
+    y += 16;
+
+    // Linea separadora
+    doc.moveTo(8, y).lineTo(W - 8, y).stroke();
+    y += 8;
+
+    // FOOTER - Mensaje de agradecimiento
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('GRACIAS POR SU COMPRA', 0, y, { width: W, align: 'center' });
+    y += 11;
+    
+    doc.font('Helvetica').fontSize(6);
+    doc.text('Este documento es valido como comprobante fiscal', 0, y, { width: W, align: 'center' });
+    y += 8;
+    doc.text(`Impreso: ${new Date().toLocaleString('es-DO')}`, 0, y, { width: W, align: 'center' });
+
+    doc.end();
+  } catch (error) {
+    console.error('Error generando PDF POS:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+
 // GET - Generar PDF de factura
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
