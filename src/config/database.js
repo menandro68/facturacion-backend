@@ -512,7 +512,14 @@ const createTables = async () => {
         ADD COLUMN IF NOT EXISTS fecha_firma_digital TIMESTAMP,
         ADD COLUMN IF NOT EXISTS qr_data TEXT
     `);
-    console.log('Columnas e-CF agregadas a invoices');
+  console.log('Columnas e-CF agregadas a invoices');
+
+    // Agregar columna primer_login a users (forzar cambio de credenciales en primer acceso)
+    await pool.query(`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS primer_login BOOLEAN DEFAULT FALSE
+    `);
+    console.log('Columna primer_login agregada a users');
 
     console.log('🎉 Base de datos lista');
   } catch (error) {

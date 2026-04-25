@@ -80,11 +80,11 @@ router.post('/tenants', verifySuperAdmin, async (req, res) => {
     const usuarioLimpio = admin_username.toLowerCase().replace(/[^a-z0-9]/g, '');
     const emailInterno = usuarioLimpio + '@empresa.local';
 
-    // Crear usuario admin del tenant
+ // Crear usuario admin del tenant (con primer_login = true para forzar cambio de credenciales)
     const hashed = await bcrypt.hash(admin_password, 10);
     await client.query(
-      `INSERT INTO users (tenant_id, nombre, email, password, rol, verificado)
-       VALUES ($1, $2, $3, $4, 'admin', true)`,
+      `INSERT INTO users (tenant_id, nombre, email, password, rol, verificado, primer_login)
+       VALUES ($1, $2, $3, $4, 'admin', true, true)`,
       [tenant.rows[0].id, admin_nombre || nombre, emailInterno, hashed]
     );
 
