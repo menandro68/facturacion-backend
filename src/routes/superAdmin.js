@@ -63,8 +63,8 @@ router.get('/tenants', verifySuperAdmin, async (req, res) => {
 router.post('/tenants', verifySuperAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { nombre, rnc, email, telefono, direccion, admin_email, admin_password, admin_nombre } = req.body;
-    if (!nombre || !email || !admin_email || !admin_password) {
+    const { nombre, rnc, email, telefono, direccion, admin_username, admin_password, admin_nombre } = req.body;
+    if (!nombre || !email || !admin_username || !admin_password) {
       return res.status(400).json({ success: false, mensaje: 'Datos incompletos' });
     }
     await client.query('BEGIN');
@@ -76,12 +76,16 @@ router.post('/tenants', verifySuperAdmin, async (req, res) => {
       [nombre, rnc || null, email, telefono || null, direccion || null]
     );
 
+    // Convertir el usuario simple en formato email interno (oculto al admin)
+    const usuarioLimpio = admin_username.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const emailInterno = usuarioLimpio + '@empresa.local';
+
     // Crear usuario admin del tenant
     const hashed = await bcrypt.hash(admin_password, 10);
     await client.query(
       `INSERT INTO users (tenant_id, nombre, email, password, rol, verificado)
        VALUES ($1, $2, $3, $4, 'admin', true)`,
-      [tenant.rows[0].id, admin_nombre || nombre, admin_email, hashed]
+      [tenant.rows[0].id, admin_nombre || nombre, emailInterno, hashed]
     );
 
     await client.query('COMMIT');
@@ -151,4 +155,4 @@ router.delete('/tenants/:id', verifySuperAdmin, async (req, res) => {
   }
 });
 
-module.exports = router;  
+module.exports = router;

@@ -80,8 +80,14 @@ const login = async (req, res) => {
       });
     }
 
-    // ── 1. Buscar en users (admin) ──
-    const login_input = email || usuario;
+// ── 1. Buscar en users (admin) ──
+    let login_input = email || usuario;
+    // Si el usuario no contiene @, es un usuario simple (ej: casaalberto)
+    // Lo convertimos automaticamente a email interno
+    if (login_input && !login_input.includes('@')) {
+      const usuarioLimpio = login_input.toLowerCase().replace(/[^a-z0-9]/g, '');
+      login_input = usuarioLimpio + '@empresa.local';
+    }
     const resultUser = await pool.query(
       `SELECT u.*, t.nombre as empresa, t.estado as tenant_estado 
        FROM users u 
