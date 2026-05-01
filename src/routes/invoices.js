@@ -767,7 +767,7 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF MEDIA CARTA VERTICAL DEFINITIVO - 5.5 x 8.5 (396 x 612)
+// PDF MEDIA CARTA VERTICAL DEFINITIVO - 5.5 x 8.5 (396 x 612) - ANCHO COMPLETO
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -789,7 +789,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 14, size: [396, 612] });
+    const doc = new PDFDocument({ margin: 8, size: [396, 612] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
       'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
@@ -802,8 +802,8 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     const W = 396;
     const H = 612;
-    const M = 14;
-    const col = W - M * 2;  // 368pt utilizables
+    const M = 8;
+    const col = W - M * 2;  // 380pt utilizables
     const azul = '#1E40AF';
     const azulOscuro = '#1E3A8A';
     const gris = '#F1F5F9';
@@ -855,19 +855,19 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     y += blockH + 10;
 
-    // TABLA DE ITEMS - 6 columnas en 368pt
+    // TABLA DE ITEMS - 6 columnas en 380pt
     const colDescX = M + 4;
-    const colDescW = 110;
-    const colCantX = M + 116;
-    const colCantW = 30;
-    const colPUnitX = M + 148;
-    const colPUnitW = 50;
-    const colSubX = M + 200;
-    const colSubW = 52;
-    const colItbisX = M + 254;
-    const colItbisW = 42;
-    const colTotalX = M + 298;
-    const colTotalW = col - (298 - M);
+    const colDescW = 115;
+    const colCantX = M + 122;
+    const colCantW = 32;
+    const colPUnitX = M + 156;
+    const colPUnitW = 52;
+    const colSubX = M + 210;
+    const colSubW = 54;
+    const colItbisX = M + 266;
+    const colItbisW = 44;
+    const colTotalX = M + 312;
+    const colTotalW = col - (312 - M);
 
     doc.rect(M, y, col, 22).fill(azulOscuro);
     doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
@@ -902,7 +902,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     y += 12;
 
     // TOTALES
-    const tw = 200;
+    const tw = 210;
     const tx = M + col - tw;
     doc.rect(tx, y, tw, 22).fill(gris).stroke(grisBorde);
     doc.fillColor(negro).fontSize(11).font('Helvetica')
