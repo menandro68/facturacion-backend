@@ -767,7 +767,7 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF MEDIA CARTA VERTICAL OPTIMIZADO - 5.5 x 8.5 (396 x 612) - UNA SOLA HOJA
+// PDF MEDIA CARTA VERTICAL ANCHO COMPLETO - 460 x 612 (cubre toda la pagina)
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -789,7 +789,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 18, size: [396, 612] });
+    const doc = new PDFDocument({ margin: 18, size: [460, 612] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
       'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
@@ -800,10 +800,10 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
-    const W = 396;
+    const W = 460;
     const H = 612;
     const M = 18;
-    const col = W - M * 2;  // 360pt utilizables
+    const col = W - M * 2;  // 424pt utilizables
     const azul = '#1E40AF';
     const azulOscuro = '#1E3A8A';
     const gris = '#F1F5F9';
@@ -812,16 +812,16 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const negro = '#1E293B';
     const grisTexto = '#64748B';
 
-    // ENCABEZADO - banda superior
+    // ENCABEZADO - banda superior cubre todo el ancho
     doc.rect(0, 0, W, 100).fill(azulOscuro);
-    doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
+    doc.fillColor('white').fontSize(20).font('Helvetica-Bold')
        .text(data.empresa_nombre || 'Mi Empresa', M, 18, { width: col / 2 });
-    doc.fontSize(9).font('Helvetica')
+    doc.fontSize(10).font('Helvetica')
        .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 50, { width: col / 2 });
-    doc.fontSize(9).text(data.empresa_email || '', M, 64, { width: col / 2 });
+    doc.fontSize(10).text(data.empresa_email || '', M, 65, { width: col / 2 });
     const rightX = M + col / 2;
     const rightW = col / 2;
-    doc.fillColor('white').fontSize(esElectronica ? 10 : 13).font('Helvetica-Bold')
+    doc.fillColor('white').fontSize(esElectronica ? 11 : 14).font('Helvetica-Bold')
        .text(tituloDocumento, rightX, 18, { width: rightW, align: 'right' });
     doc.fontSize(10).font('Helvetica')
        .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 38, { width: rightW, align: 'right' });
@@ -834,117 +834,117 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     let y = 115;
 
-    // BLOQUE CLIENTE/CONDICIONES
+    // BLOQUE CLIENTE/CONDICIONES - cubre todo el ancho
     const blockH = 140;
     doc.rect(M, y, col, blockH).fill(gris).stroke(grisBorde);
-    doc.fillColor(azul).fontSize(12).font('Helvetica-Bold').text('CLIENTE', M + 10, y + 12);
-    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
-       .text(data.cliente_nombre || 'Consumidor Final', M + 10, y + 32, { width: (col / 2) - 15 });
-    doc.fontSize(10).font('Helvetica')
-       .text(`RNC/Cédula: ${data.rnc_cedula || 'N/A'}`, M + 10, y + 58)
-       .text(`Tel: ${data.cliente_telefono || 'N/A'}`, M + 10, y + 80)
-       .text(`Dir: ${data.cliente_direccion || 'N/A'}`, M + 10, y + 102, { width: (col / 2) - 15 });
-    const rx = M + col / 2 + 10;
-    doc.fillColor(azul).fontSize(12).font('Helvetica-Bold').text('CONDICIONES', rx, y + 12);
+    doc.fillColor(azul).fontSize(13).font('Helvetica-Bold').text('CLIENTE', M + 12, y + 12);
+    doc.fillColor(negro).fontSize(13).font('Helvetica-Bold')
+       .text(data.cliente_nombre || 'Consumidor Final', M + 12, y + 32, { width: (col / 2) - 18 });
+    doc.fontSize(11).font('Helvetica')
+       .text(`RNC/Cédula: ${data.rnc_cedula || 'N/A'}`, M + 12, y + 58)
+       .text(`Tel: ${data.cliente_telefono || 'N/A'}`, M + 12, y + 80)
+       .text(`Dir: ${data.cliente_direccion || 'N/A'}`, M + 12, y + 102, { width: (col / 2) - 18 });
+    const rx = M + col / 2 + 12;
+    doc.fillColor(azul).fontSize(13).font('Helvetica-Bold').text('CONDICIONES', rx, y + 12);
     const condMap = { contado: 'Contado', '7_dias': '7 Días', '15_dias': '15 Días', '30_dias': '30 Días', '45_dias': '45 Días', '60_dias': '60 Días' };
-    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
+    doc.fillColor(negro).fontSize(13).font('Helvetica-Bold')
        .text(condMap[data.cliente_condiciones] || 'Contado', rx, y + 32);
-    doc.fontSize(10).font('Helvetica')
+    doc.fontSize(11).font('Helvetica')
        .text(`Vendedor: ${data.vendedor_nombre || 'N/A'}`, rx, y + 58)
-       .text(`Negocio: ${data.cliente_negocio || 'N/A'}`, rx, y + 80, { width: col / 2 - 15 });
+       .text(`Negocio: ${data.cliente_negocio || 'N/A'}`, rx, y + 80, { width: col / 2 - 18 });
 
     y += blockH + 12;
 
-    // TABLA DE ITEMS - 6 columnas en 360pt utilizables
-    const colDescX = M + 4;
-    const colDescW = 100;
-    const colCantX = M + 106;
-    const colCantW = 32;
-    const colPUnitX = M + 140;
-    const colPUnitW = 50;
-    const colSubX = M + 192;
-    const colSubW = 52;
-    const colItbisX = M + 246;
-    const colItbisW = 42;
-    const colTotalX = M + 290;
-    const colTotalW = col - (290 - M);
+    // TABLA DE ITEMS - 6 columnas en 424pt utilizables
+    const colDescX = M + 6;
+    const colDescW = 130;
+    const colCantX = M + 140;
+    const colCantW = 38;
+    const colPUnitX = M + 182;
+    const colPUnitW = 60;
+    const colSubX = M + 246;
+    const colSubW = 62;
+    const colItbisX = M + 312;
+    const colItbisW = 50;
+    const colTotalX = M + 366;
+    const colTotalW = col - (366 - M);
 
-    doc.rect(M, y, col, 22).fill(azulOscuro);
-    doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
-    doc.text('DESCRIPCION', colDescX, y + 7, { width: colDescW });
-    doc.text('CANT', colCantX, y + 7, { width: colCantW, align: 'right' });
-    doc.text('P. UNIT', colPUnitX, y + 7, { width: colPUnitW, align: 'right' });
-    doc.text('SUBTOTAL', colSubX, y + 7, { width: colSubW, align: 'right' });
-    doc.text('ITBIS', colItbisX, y + 7, { width: colItbisW, align: 'right' });
-    doc.text('TOTAL', colTotalX, y + 7, { width: colTotalW, align: 'right' });
-    y += 22;
+    doc.rect(M, y, col, 24).fill(azulOscuro);
+    doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
+    doc.text('DESCRIPCION', colDescX, y + 8, { width: colDescW });
+    doc.text('CANT', colCantX, y + 8, { width: colCantW, align: 'right' });
+    doc.text('P. UNIT', colPUnitX, y + 8, { width: colPUnitW, align: 'right' });
+    doc.text('SUBTOTAL', colSubX, y + 8, { width: colSubW, align: 'right' });
+    doc.text('ITBIS', colItbisX, y + 8, { width: colItbisW, align: 'right' });
+    doc.text('TOTAL', colTotalX, y + 8, { width: colTotalW, align: 'right' });
+    y += 24;
 
-    doc.fontSize(9).font('Helvetica');
+    doc.fontSize(10).font('Helvetica');
     let rowColor = true;
     for (const item of items.rows) {
-      const rowH = 22;
+      const rowH = 24;
       if (rowColor) doc.rect(M, y, col, rowH).fill(grisClaro);
       rowColor = !rowColor;
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
       doc.fillColor(negro)
-         .text(item.descripcion, colDescX, y + 7, { width: colDescW })
-         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 7, { width: colCantW, align: 'right' })
-         .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 7, { width: colPUnitW, align: 'right' })
-         .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 7, { width: colSubW, align: 'right' })
-         .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 7, { width: colItbisW, align: 'right' })
-         .text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), colTotalX, y + 7, { width: colTotalW, align: 'right' });
+         .text(item.descripcion, colDescX, y + 8, { width: colDescW })
+         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 8, { width: colCantW, align: 'right' })
+         .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 8, { width: colPUnitW, align: 'right' })
+         .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 8, { width: colSubW, align: 'right' })
+         .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 8, { width: colItbisW, align: 'right' })
+         .text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), colTotalX, y + 8, { width: colTotalW, align: 'right' });
       doc.moveTo(M, y + rowH).lineTo(M + col, y + rowH).strokeColor(grisBorde).lineWidth(0.5).stroke();
       y += rowH;
     }
 
     // Linea separadora
     doc.rect(M, y, col, 2).fill(azulOscuro);
-    y += 12;
+    y += 14;
 
     // TOTALES
-    const tw = 200;
+    const tw = 230;
     const tx = M + col - tw;
-    doc.rect(tx, y, tw, 22).fill(gris).stroke(grisBorde);
+    doc.rect(tx, y, tw, 24).fill(gris).stroke(grisBorde);
     doc.fillColor(negro).fontSize(11).font('Helvetica')
-       .text('Subtotal:', tx + 10, y + 6)
+       .text('Subtotal:', tx + 12, y + 7)
        .font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 10, align: 'right' });
-    y += 22;
-    doc.rect(tx, y, tw, 22).fill(gris).stroke(grisBorde);
+       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
+    y += 24;
+    doc.rect(tx, y, tw, 24).fill(gris).stroke(grisBorde);
     doc.fillColor(negro).fontSize(11).font('Helvetica')
-       .text('ITBIS (18%):', tx + 10, y + 6)
+       .text('ITBIS (18%):', tx + 12, y + 7)
        .font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 10, align: 'right' });
-    y += 22;
-    doc.rect(tx, y, tw, 30).fill(azulOscuro);
-    doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
-       .text('TOTAL:', tx + 10, y + 9)
-       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 9, { width: tw - 10, align: 'right' });
+       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
+    y += 24;
+    doc.rect(tx, y, tw, 32).fill(azulOscuro);
+    doc.fillColor('white').fontSize(14).font('Helvetica-Bold')
+       .text('TOTAL:', tx + 12, y + 9)
+       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 9, { width: tw - 12, align: 'right' });
 
     // E-CF (si aplica)
     if (esElectronica) {
-      let qrY = y + 42;
+      let qrY = y + 45;
       const qrData = `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=${data.empresa_rnc || ''}&ENCF=${data.ncf || ''}&MontoTotal=${parseFloat(data.total).toFixed(2)}&FechaEmision=${data.fecha_emision ? new Date(data.fecha_emision).toISOString().split('T')[0] : ''}&CodigoSeguridad=${data.codigo_seguridad || ''}`;
       try {
-        const qrPng = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
-        doc.image(qrPng, M, qrY, { width: 65, height: 65 });
-        doc.fillColor(azul).fontSize(8).font('Helvetica-Bold')
-           .text('VALIDACION DGII (e-CF)', M + 70, qrY);
-        doc.fillColor(negro).fontSize(7).font('Helvetica')
-           .text(`Codigo: ${data.codigo_seguridad || '-'}`, M + 70, qrY + 12)
-           .text(`Vence: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, M + 70, qrY + 24)
-           .text('Escanee el QR para validar en DGII', M + 70, qrY + 40, { width: col - 80 });
+        const qrPng = await QRCode.toBuffer(qrData, { width: 110, margin: 1 });
+        doc.image(qrPng, M, qrY, { width: 70, height: 70 });
+        doc.fillColor(azul).fontSize(9).font('Helvetica-Bold')
+           .text('VALIDACION DGII (e-CF)', M + 76, qrY);
+        doc.fillColor(negro).fontSize(8).font('Helvetica')
+           .text(`Codigo: ${data.codigo_seguridad || '-'}`, M + 76, qrY + 12)
+           .text(`Vence: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, M + 76, qrY + 24)
+           .text('Escanee el QR para validar en DGII', M + 76, qrY + 42, { width: col - 90 });
       } catch (qrError) {
         // continuar sin QR
       }
     }
 
     // FOOTER al pie de la pagina
-    const footerY = H - 30;
-    doc.moveTo(M, footerY - 8).lineTo(M + col, footerY - 8).strokeColor(grisBorde).lineWidth(0.8).stroke();
-    doc.fillColor(azulOscuro).fontSize(11).font('Helvetica-Bold')
+    const footerY = H - 32;
+    doc.moveTo(M, footerY - 8).lineTo(M + col, footerY - 8).strokeColor(grisBorde).lineWidth(1).stroke();
+    doc.fillColor(azulOscuro).fontSize(12).font('Helvetica-Bold')
        .text('Gracias por su preferencia', M, footerY, { width: col, align: 'center' });
-    doc.fillColor(grisTexto).fontSize(8).font('Helvetica')
+    doc.fillColor(grisTexto).fontSize(9).font('Helvetica')
        .text('Este documento es valido como comprobante fiscal', M, footerY + 14, { width: col, align: 'center' });
 
     doc.end();
