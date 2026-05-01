@@ -589,7 +589,7 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF POS - SIN TOCAR
+// PDF POS - SIN TOCAR (PUNTO DE VENTA - INTACTO)
 router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -767,7 +767,9 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF MEDIA CARTA VERTICAL DEFINITIVO - 5.5 x 8.5 (396 x 612)
+// ============================================================================
+// PDF MEDIA CARTA - DISEÑO PROFESIONAL MODERNO - 5.5 x 8.5 (396 x 612)
+// ============================================================================
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -789,163 +791,276 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 14, size: [396, 612] });
+    const doc = new PDFDocument({ margin: 0, size: [396, 612] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
-      'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
-      'E32': 'FACTURA CONSUMO ELECTRONICA',
-      'E34': 'NOTA DE CREDITO ELECTRONICA'
+      'E31': 'FACTURA CREDITO FISCAL',
+      'E32': 'FACTURA CONSUMO',
+      'E34': 'NOTA DE CREDITO'
     }[data.ncf_tipo] || 'FACTURA';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
+    // PALETA DE COLORES PROFESIONAL
     const W = 396;
     const H = 612;
-    const M = 14;
-    const col = W - M * 2;  // 368pt utilizables
-    const azul = '#1E40AF';
-    const azulOscuro = '#1E3A8A';
-    const gris = '#F1F5F9';
-    const grisClaro = '#F8FAFC';
-    const grisBorde = '#CBD5E1';
-    const negro = '#1E293B';
-    const grisTexto = '#64748B';
+    const M = 16;
+    const col = W - M * 2;
+    
+    const primario = '#0F172A';      // Azul oscuro corporativo
+    const acento = '#3B82F6';        // Azul brillante
+    const grisFondo = '#F8FAFC';     // Gris muy suave
+    const grisLinea = '#E2E8F0';     // Gris para líneas
+    const grisMedio = '#94A3B8';     // Gris medio
+    const negro = '#0F172A';         // Negro suave
+    const blanco = '#FFFFFF';
 
-    // ENCABEZADO
-    doc.rect(0, 0, W, 95).fill(azulOscuro);
-    doc.fillColor('white').fontSize(17).font('Helvetica-Bold')
-       .text(data.empresa_nombre || 'Mi Empresa', M, 14, { width: col / 2 });
-    doc.fontSize(9).font('Helvetica')
-       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 44, { width: col / 2 });
-    doc.fontSize(9).text(data.empresa_email || '', M, 58, { width: col / 2 });
-    const rightX = M + col / 2;
-    const rightW = col / 2;
-    doc.fillColor('white').fontSize(esElectronica ? 10 : 13).font('Helvetica-Bold')
-       .text(tituloDocumento, rightX, 14, { width: rightW, align: 'right' });
-    doc.fontSize(10).font('Helvetica')
-       .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 33, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 47, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 60, { width: rightW, align: 'right' });
+    // ============== ENCABEZADO PRINCIPAL ==============
+    doc.rect(0, 0, W, 90).fill(primario);
+    
+    // Banda de acento delgada
+    doc.rect(0, 90, W, 3).fill(acento);
+    
+    // Nombre empresa (izquierda)
+    doc.fillColor(blanco).fontSize(18).font('Helvetica-Bold')
+       .text(data.empresa_nombre || 'Mi Empresa', M, 18, { width: col / 2 - 5 });
+    
+    // Datos empresa
+    doc.fontSize(8).font('Helvetica').fillColor('#CBD5E1')
+       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 44, { width: col / 2 - 5 });
+    if (data.empresa_email) {
+      doc.text(data.empresa_email, M, 56, { width: col / 2 - 5 });
+    }
+    
+    // Tipo documento (derecha)
+    const rightX = W / 2 + 5;
+    const rightW = W / 2 - M - 5;
+    
+    doc.fillColor(blanco).fontSize(13).font('Helvetica-Bold')
+       .text(tituloDocumento, rightX, 18, { width: rightW, align: 'right' });
+    
+    if (esElectronica) {
+      doc.fillColor(acento).fontSize(7).font('Helvetica-Bold')
+         .text('ELECTRONICA', rightX, 35, { width: rightW, align: 'right' });
+    }
+    
+    // NCF destacado
+    doc.fillColor('#CBD5E1').fontSize(7).font('Helvetica')
+       .text('NCF', rightX, esElectronica ? 47 : 40, { width: rightW, align: 'right' });
+    doc.fillColor(blanco).fontSize(11).font('Helvetica-Bold')
+       .text(data.ncf || 'N/A', rightX, esElectronica ? 56 : 50, { width: rightW, align: 'right' });
+    
     if (data.numero_factura) {
-      doc.fontSize(9).font('Helvetica-Bold')
-         .text(`Factura No.: ${String(data.numero_factura).padStart(8, '0')}`, rightX, 73, { width: rightW, align: 'right' });
+      doc.fillColor('#CBD5E1').fontSize(7).font('Helvetica')
+         .text(`No. ${String(data.numero_factura).padStart(8, '0')}`, rightX, 72, { width: rightW, align: 'right' });
     }
 
-    let y = 108;
+    let y = 105;
 
-    // BLOQUE CLIENTE/CONDICIONES
-    const blockH = 130;
-    doc.rect(M, y, col, blockH).fill(gris).stroke(grisBorde);
-    doc.fillColor(azul).fontSize(11).font('Helvetica-Bold').text('CLIENTE', M + 8, y + 10);
-    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
-       .text(data.cliente_nombre || 'Consumidor Final', M + 8, y + 28, { width: (col / 2) - 12 });
-    doc.fontSize(9).font('Helvetica')
-       .text(`RNC/Cédula: ${data.rnc_cedula || 'N/A'}`, M + 8, y + 50)
-       .text(`Tel: ${data.cliente_telefono || 'N/A'}`, M + 8, y + 70)
-       .text(`Dir: ${data.cliente_direccion || 'N/A'}`, M + 8, y + 90, { width: (col / 2) - 12 });
-    const rx = M + col / 2 + 8;
-    doc.fillColor(azul).fontSize(11).font('Helvetica-Bold').text('CONDICIONES', rx, y + 10);
+    // ============== BARRA INFO RAPIDA ==============
+    doc.rect(M, y, col, 24).fill(grisFondo).stroke(grisLinea);
+    
+    // Estado
+    const estadoColor = data.estado === 'emitida' ? '#10B981' : 
+                        data.estado === 'anulada' ? '#EF4444' : acento;
+    doc.fillColor(grisMedio).fontSize(7).font('Helvetica').text('ESTADO', M + 10, y + 5);
+    doc.fillColor(estadoColor).fontSize(9).font('Helvetica-Bold')
+       .text(data.estado.toUpperCase(), M + 10, y + 14);
+    
+    // Línea divisora vertical 1
+    doc.moveTo(M + col / 3, y + 4).lineTo(M + col / 3, y + 20).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    
+    // Fecha
+    doc.fillColor(grisMedio).fontSize(7).font('Helvetica').text('FECHA', M + col / 3 + 10, y + 5);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO'), M + col / 3 + 10, y + 14);
+    
+    // Línea divisora vertical 2
+    doc.moveTo(M + (col / 3) * 2, y + 4).lineTo(M + (col / 3) * 2, y + 20).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    
+    // Condiciones
     const condMap = { contado: 'Contado', '7_dias': '7 Días', '15_dias': '15 Días', '30_dias': '30 Días', '45_dias': '45 Días', '60_dias': '60 Días' };
-    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
-       .text(condMap[data.cliente_condiciones] || 'Contado', rx, y + 28);
-    doc.fontSize(9).font('Helvetica')
-       .text(`Vendedor: ${data.vendedor_nombre || 'N/A'}`, rx, y + 50)
-       .text(`Negocio: ${data.cliente_negocio || 'N/A'}`, rx, y + 70, { width: col / 2 - 12 });
+    doc.fillColor(grisMedio).fontSize(7).font('Helvetica').text('PAGO', M + (col / 3) * 2 + 10, y + 5);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(condMap[data.cliente_condiciones] || 'Contado', M + (col / 3) * 2 + 10, y + 14);
 
-    y += blockH + 10;
+    y += 32;
 
-    // TABLA DE ITEMS - 6 columnas en 368pt
-    const colDescX = M + 4;
-    const colDescW = 110;
-    const colCantX = M + 116;
-    const colCantW = 30;
-    const colPUnitX = M + 148;
-    const colPUnitW = 50;
-    const colSubX = M + 200;
-    const colSubW = 52;
-    const colItbisX = M + 254;
-    const colItbisW = 42;
-    const colTotalX = M + 298;
-    const colTotalW = col - (298 - M);
-
-    doc.rect(M, y, col, 22).fill(azulOscuro);
-    doc.fillColor('white').fontSize(8).font('Helvetica-Bold');
-    doc.text('DESCRIPCION', colDescX, y + 7, { width: colDescW });
-    doc.text('CANT', colCantX, y + 7, { width: colCantW, align: 'right' });
-    doc.text('P. UNIT', colPUnitX, y + 7, { width: colPUnitW, align: 'right' });
-    doc.text('SUBTOTAL', colSubX, y + 7, { width: colSubW, align: 'right' });
-    doc.text('ITBIS', colItbisX, y + 7, { width: colItbisW, align: 'right' });
-    doc.text('TOTAL', colTotalX, y + 7, { width: colTotalW, align: 'right' });
+    // ============== INFO CLIENTE ==============
+    // Etiqueta CLIENTE
+    doc.fillColor(acento).fontSize(8).font('Helvetica-Bold')
+       .text('CLIENTE', M, y);
+    
+    // Línea bajo etiqueta
+    doc.moveTo(M, y + 12).lineTo(M + 50, y + 12).strokeColor(acento).lineWidth(1.5).stroke();
+    
+    y += 20;
+    
+    // Nombre cliente grande
+    doc.fillColor(negro).fontSize(13).font('Helvetica-Bold')
+       .text(data.cliente_nombre || 'Consumidor Final', M, y, { width: col });
+    
+    y += 18;
+    
+    // Datos en 2 columnas
+    const labelW = 55;
+    const colDataW = (col - 20) / 2;
+    
+    // Columna izquierda
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('RNC/Cédula:', M, y);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(data.rnc_cedula || 'N/A', M + labelW, y, { width: colDataW - labelW });
+    
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('Teléfono:', M, y + 14);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(data.cliente_telefono || 'N/A', M + labelW, y + 14, { width: colDataW - labelW });
+    
+    // Columna derecha
+    const rx = M + colDataW + 20;
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('Vendedor:', rx, y);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(data.vendedor_nombre || 'N/A', rx + labelW, y, { width: colDataW - labelW });
+    
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('Negocio:', rx, y + 14);
+    doc.fillColor(negro).fontSize(9).font('Helvetica-Bold')
+       .text(data.cliente_negocio || 'N/A', rx + labelW, y + 14, { width: colDataW - labelW });
+    
+    y += 32;
+    
+    // Dirección (línea completa)
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('Dirección:', M, y);
+    doc.fillColor(negro).fontSize(9).font('Helvetica')
+       .text(data.cliente_direccion || 'N/A', M + labelW, y, { width: col - labelW });
+    
     y += 22;
 
-    doc.fontSize(9).font('Helvetica');
-    let rowColor = true;
+    // ============== TABLA DE ITEMS ==============
+    // Calcular columnas (col = 364pt)
+    const tableX = M;
+    const tableW = col;
+    
+    // Distribución de columnas
+    const cDescW = 130;
+    const cCantW = 30;
+    const cPrecioW = 55;
+    const cSubW = 55;
+    const cItbisW = 40;
+    const cTotalW = tableW - cDescW - cCantW - cPrecioW - cSubW - cItbisW;
+    
+    const cDescX = tableX;
+    const cCantX = cDescX + cDescW;
+    const cPrecioX = cCantX + cCantW;
+    const cSubX = cPrecioX + cPrecioW;
+    const cItbisX = cSubX + cSubW;
+    const cTotalX = cItbisX + cItbisW;
+    
+    // Header tabla
+    doc.rect(tableX, y, tableW, 22).fill(primario);
+    doc.fillColor(blanco).fontSize(8).font('Helvetica-Bold');
+    doc.text('DESCRIPCION', cDescX + 6, y + 7, { width: cDescW - 8 });
+    doc.text('CANT', cCantX, y + 7, { width: cCantW, align: 'center' });
+    doc.text('PRECIO', cPrecioX, y + 7, { width: cPrecioW - 4, align: 'right' });
+    doc.text('SUBTOTAL', cSubX, y + 7, { width: cSubW - 4, align: 'right' });
+    doc.text('ITBIS', cItbisX, y + 7, { width: cItbisW - 4, align: 'right' });
+    doc.text('TOTAL', cTotalX, y + 7, { width: cTotalW - 6, align: 'right' });
+    y += 22;
+    
+    // Filas
+    doc.font('Helvetica');
+    let rowAlt = false;
     for (const item of items.rows) {
       const rowH = 22;
-      if (rowColor) doc.rect(M, y, col, rowH).fill(grisClaro);
-      rowColor = !rowColor;
+      if (rowAlt) doc.rect(tableX, y, tableW, rowH).fill(grisFondo);
+      
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      doc.fillColor(negro)
-         .text(item.descripcion, colDescX, y + 7, { width: colDescW })
-         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 7, { width: colCantW, align: 'right' })
-         .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 7, { width: colPUnitW, align: 'right' })
-         .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 7, { width: colSubW, align: 'right' })
-         .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 7, { width: colItbisW, align: 'right' })
-         .text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), colTotalX, y + 7, { width: colTotalW, align: 'right' });
-      doc.moveTo(M, y + rowH).lineTo(M + col, y + rowH).strokeColor(grisBorde).lineWidth(0.5).stroke();
+      
+      doc.fillColor(negro).fontSize(8.5).font('Helvetica');
+      doc.text(item.descripcion, cDescX + 6, y + 7, { width: cDescW - 8, ellipsis: true });
+      
+      doc.fontSize(9).font('Helvetica-Bold');
+      doc.text(parseFloat(item.cantidad).toFixed(0), cCantX, y + 7, { width: cCantW, align: 'center' });
+      
+      doc.fontSize(8.5).font('Helvetica');
+      doc.text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), cPrecioX, y + 7, { width: cPrecioW - 4, align: 'right' });
+      doc.text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), cSubX, y + 7, { width: cSubW - 4, align: 'right' });
+      doc.text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), cItbisX, y + 7, { width: cItbisW - 4, align: 'right' });
+      
+      doc.fontSize(9).font('Helvetica-Bold');
+      doc.text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), cTotalX, y + 7, { width: cTotalW - 6, align: 'right' });
+      
+      // Línea divisora
+      doc.moveTo(tableX, y + rowH).lineTo(tableX + tableW, y + rowH).strokeColor(grisLinea).lineWidth(0.3).stroke();
+      
+      rowAlt = !rowAlt;
       y += rowH;
     }
-
-    // Linea separadora
-    doc.rect(M, y, col, 2).fill(azulOscuro);
+    
+    // Línea de cierre tabla
+    doc.moveTo(tableX, y).lineTo(tableX + tableW, y).strokeColor(primario).lineWidth(1.5).stroke();
     y += 12;
 
-    // TOTALES
-    const tw = 200;
-    const tx = M + col - tw;
-    doc.rect(tx, y, tw, 22).fill(gris).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(11).font('Helvetica')
-       .text('Subtotal:', tx + 10, y + 6)
-       .font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 10, align: 'right' });
-    y += 22;
-    doc.rect(tx, y, tw, 22).fill(gris).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(11).font('Helvetica')
-       .text('ITBIS (18%):', tx + 10, y + 6)
-       .font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 10, align: 'right' });
-    y += 22;
-    doc.rect(tx, y, tw, 30).fill(azulOscuro);
-    doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
-       .text('TOTAL:', tx + 10, y + 9)
-       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 9, { width: tw - 10, align: 'right' });
+    // ============== TOTALES ==============
+    const totalesW = 200;
+    const totalesX = M + col - totalesW;
+    
+    // Subtotal
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica')
+       .text('Subtotal:', totalesX, y);
+    doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y, { width: totalesW, align: 'right' });
+    y += 16;
+    
+    // ITBIS
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica')
+       .text('ITBIS (18%):', totalesX, y);
+    doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y, { width: totalesW, align: 'right' });
+    y += 18;
+    
+    // Línea separadora
+    doc.moveTo(totalesX, y).lineTo(totalesX + totalesW, y).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    y += 8;
+    
+    // TOTAL FINAL grande
+    doc.rect(totalesX, y, totalesW, 32).fill(primario);
+    doc.fillColor('#94A3B8').fontSize(8).font('Helvetica-Bold')
+       .text('TOTAL A PAGAR', totalesX + 12, y + 6);
+    doc.fillColor(blanco).fontSize(16).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y + 14, { width: totalesW - 12, align: 'right' });
+    
+    y += 40;
 
-    // E-CF (si aplica)
+    // ============== E-CF (si aplica) ==============
     if (esElectronica) {
-      let qrY = y + 42;
       const qrData = `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=${data.empresa_rnc || ''}&ENCF=${data.ncf || ''}&MontoTotal=${parseFloat(data.total).toFixed(2)}&FechaEmision=${data.fecha_emision ? new Date(data.fecha_emision).toISOString().split('T')[0] : ''}&CodigoSeguridad=${data.codigo_seguridad || ''}`;
       try {
         const qrPng = await QRCode.toBuffer(qrData, { width: 100, margin: 1 });
-        doc.image(qrPng, M, qrY, { width: 60, height: 60 });
-        doc.fillColor(azul).fontSize(8).font('Helvetica-Bold')
-           .text('VALIDACION DGII (e-CF)', M + 65, qrY);
-        doc.fillColor(negro).fontSize(7).font('Helvetica')
-           .text(`Codigo: ${data.codigo_seguridad || '-'}`, M + 65, qrY + 12)
-           .text(`Vence: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, M + 65, qrY + 24)
-           .text('Escanee QR para validar en DGII', M + 65, qrY + 40, { width: col - 75 });
+        const qrSize = 55;
+        doc.image(qrPng, M, y, { width: qrSize, height: qrSize });
+        
+        doc.fillColor(acento).fontSize(8).font('Helvetica-Bold')
+           .text('VALIDACION DGII', M + qrSize + 8, y);
+        doc.fillColor(grisMedio).fontSize(7).font('Helvetica')
+           .text(`Código: ${data.codigo_seguridad || '-'}`, M + qrSize + 8, y + 12);
+        doc.text(`Vence: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, M + qrSize + 8, y + 22);
+        doc.fillColor(negro).fontSize(7).font('Helvetica-Oblique')
+           .text('Escanee para validar el comprobante', M + qrSize + 8, y + 38, { width: col - qrSize - 16 });
       } catch (qrError) {
         // continuar sin QR
       }
     }
 
-    // FOOTER
-    const footerY = H - 28;
-    doc.moveTo(M, footerY - 8).lineTo(M + col, footerY - 8).strokeColor(grisBorde).lineWidth(0.8).stroke();
-    doc.fillColor(azulOscuro).fontSize(11).font('Helvetica-Bold')
+    // ============== FOOTER ==============
+    const footerY = H - 32;
+    
+    // Banda de acento
+    doc.rect(0, footerY - 10, W, 2).fill(acento);
+    
+    doc.fillColor(primario).fontSize(10).font('Helvetica-Bold')
        .text('Gracias por su preferencia', M, footerY, { width: col, align: 'center' });
-    doc.fillColor(grisTexto).fontSize(8).font('Helvetica')
-       .text('Este documento es valido como comprobante fiscal', M, footerY + 12, { width: col, align: 'center' });
+    doc.fillColor(grisMedio).fontSize(7).font('Helvetica')
+       .text('Este documento es válido como comprobante fiscal', M, footerY + 14, { width: col, align: 'center' });
 
     doc.end();
   } catch (error) {
@@ -953,8 +1068,9 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-
-// PDF CARTA ENTERA - DISEÑO COMPACTO PROFESIONAL
+// ============================================================================
+// PDF CARTA ENTERA - DISEÑO PROFESIONAL MODERNO - 8.5 x 11 (612 x 792)
+// ============================================================================
 router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -976,204 +1092,276 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    // Carta Entera con margen amplio: 60pt cada lado = 21mm
-    const doc = new PDFDocument({ margin: 60, size: [612, 792] });
+    const doc = new PDFDocument({ margin: 0, size: [612, 792] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
-      'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
-      'E32': 'FACTURA CONSUMO ELECTRONICA',
-      'E34': 'NOTA DE CREDITO ELECTRONICA'
+      'E31': 'FACTURA CREDITO FISCAL',
+      'E32': 'FACTURA CONSUMO',
+      'E34': 'NOTA DE CREDITO'
     }[data.ncf_tipo] || 'FACTURA';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-carta-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
-    // CONFIGURACION COMPACTA
+    // PALETA PROFESIONAL
     const W = 612;
-    const M = 60;
-    const col = W - M * 2;  // 492pt utilizables
-
-    // Paleta profesional
-    const azulOscuro = '#1E3A8A';
-    const azulMedio = '#3B82F6';
-    const grisClaro = '#F8FAFC';
-    const grisFondo = '#F1F5F9';
-    const grisBorde = '#CBD5E1';
+    const H = 792;
+    const M = 40;
+    const col = W - M * 2;
+    
+    const primario = '#0F172A';
+    const acento = '#3B82F6';
+    const grisFondo = '#F8FAFC';
+    const grisLinea = '#E2E8F0';
+    const grisMedio = '#94A3B8';
     const negro = '#0F172A';
-    const grisTexto = '#64748B';
+    const blanco = '#FFFFFF';
 
-    // ENCABEZADO
-    doc.rect(0, 0, W, 95).fill(azulOscuro);
-    doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
-       .text(data.empresa_nombre || 'MI EMPRESA', M, 25, { width: col / 2 });
-    doc.fontSize(9).font('Helvetica')
-       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 56, { width: col / 2 });
-    doc.fontSize(9).text(data.empresa_email || '', M, 70, { width: col / 2 });
-    const rightX = M + col / 2;
-    const rightW = col / 2;
-    doc.fillColor('white').fontSize(esElectronica ? 11 : 14).font('Helvetica-Bold')
-       .text(tituloDocumento, rightX, 25, { width: rightW, align: 'right' });
-    doc.fontSize(10).font('Helvetica')
-       .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 46, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 60, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 74, { width: rightW, align: 'right' });
-
-    let y = 105;
+    // ============== ENCABEZADO PRINCIPAL ==============
+    doc.rect(0, 0, W, 130).fill(primario);
+    doc.rect(0, 130, W, 4).fill(acento);
+    
+    // Empresa
+    doc.fillColor(blanco).fontSize(28).font('Helvetica-Bold')
+       .text(data.empresa_nombre || 'MI EMPRESA', M, 32, { width: col / 2 - 10 });
+    
+    doc.fontSize(10).font('Helvetica').fillColor('#CBD5E1')
+       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 72);
+    if (data.empresa_email) {
+      doc.text(data.empresa_email, M, 88);
+    }
+    
+    // Tipo documento (derecha)
+    const rightX = W / 2 + 10;
+    const rightW = W / 2 - M - 10;
+    
+    doc.fillColor(blanco).fontSize(20).font('Helvetica-Bold')
+       .text(tituloDocumento, rightX, 32, { width: rightW, align: 'right' });
+    
+    if (esElectronica) {
+      doc.fillColor(acento).fontSize(10).font('Helvetica-Bold')
+         .text('ELECTRONICA', rightX, 58, { width: rightW, align: 'right' });
+    }
+    
+    doc.fillColor('#CBD5E1').fontSize(9).font('Helvetica')
+       .text('NCF', rightX, esElectronica ? 76 : 64, { width: rightW, align: 'right' });
+    doc.fillColor(blanco).fontSize(16).font('Helvetica-Bold')
+       .text(data.ncf || 'N/A', rightX, esElectronica ? 88 : 76, { width: rightW, align: 'right' });
+    
     if (data.numero_factura) {
-      doc.rect(M, y, col, 22).fill(azulMedio);
-      doc.fillColor('white').fontSize(10).font('Helvetica-Bold')
-         .text(`FACTURA No.: ${String(data.numero_factura).padStart(8, '0')}`, M + 10, y + 7, { width: col - 20, align: 'right' });
-      y += 32;
-    } else {
-      y = 115;
+      doc.fillColor('#CBD5E1').fontSize(9).font('Helvetica')
+         .text(`Factura No. ${String(data.numero_factura).padStart(8, '0')}`, rightX, 110, { width: rightW, align: 'right' });
     }
 
-    // BLOQUES CLIENTE / CONDICIONES
-    const blockH = 100;
-    const gap = 12;
-    const blockW = (col - gap) / 2;
+    let y = 155;
 
-    doc.rect(M, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
-    doc.rect(M, y, blockW, 22).fill(azulOscuro);
-    doc.fillColor('white').fontSize(10).font('Helvetica-Bold')
-       .text('CLIENTE', M + 10, y + 7);
-    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
-       .text(data.cliente_nombre || 'Consumidor Final', M + 10, y + 30, { width: blockW - 20 });
-    doc.fontSize(9).font('Helvetica').fillColor(grisTexto)
-       .text('RNC/Cedula:', M + 10, y + 50);
-    doc.fillColor(negro)
-       .text(data.rnc_cedula || 'N/A', M + 70, y + 50);
-    doc.fillColor(grisTexto)
-       .text('Telefono:', M + 10, y + 65);
-    doc.fillColor(negro)
-       .text(data.cliente_telefono || 'N/A', M + 70, y + 65);
-    doc.fillColor(grisTexto)
-       .text('Direccion:', M + 10, y + 80);
-    doc.fillColor(negro)
-       .text(data.cliente_direccion || 'N/A', M + 70, y + 80, { width: blockW - 80 });
+    // ============== BARRA INFO RAPIDA ==============
+    doc.rect(M, y, col, 36).fill(grisFondo).stroke(grisLinea);
+    
+    const colInfoW = col / 3;
+    
+    // Estado
+    const estadoColor = data.estado === 'emitida' ? '#10B981' : 
+                        data.estado === 'anulada' ? '#EF4444' : acento;
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('ESTADO', M + 16, y + 8);
+    doc.fillColor(estadoColor).fontSize(12).font('Helvetica-Bold')
+       .text(data.estado.toUpperCase(), M + 16, y + 19);
+    
+    doc.moveTo(M + colInfoW, y + 6).lineTo(M + colInfoW, y + 30).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    
+    // Fecha
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('FECHA EMISION', M + colInfoW + 16, y + 8);
+    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
+       .text(data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO'), M + colInfoW + 16, y + 19);
+    
+    doc.moveTo(M + colInfoW * 2, y + 6).lineTo(M + colInfoW * 2, y + 30).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    
+    // Condiciones
+    const condMap = { contado: 'Contado', '7_dias': '7 Días', '15_dias': '15 Días', '30_dias': '30 Días', '45_dias': '45 Días', '60_dias': '60 Días' };
+    doc.fillColor(grisMedio).fontSize(8).font('Helvetica').text('CONDICIONES PAGO', M + colInfoW * 2 + 16, y + 8);
+    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
+       .text(condMap[data.cliente_condiciones] || 'Contado', M + colInfoW * 2 + 16, y + 19);
 
-    const cx = M + blockW + gap;
-    doc.rect(cx, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
-    doc.rect(cx, y, blockW, 22).fill(azulOscuro);
-    doc.fillColor('white').fontSize(10).font('Helvetica-Bold')
-       .text('CONDICIONES DE PAGO', cx + 10, y + 7);
-    const condMap = { contado: 'Contado', '7_dias': '7 Dias', '15_dias': '15 Dias', '30_dias': '30 Dias', '45_dias': '45 Dias', '60_dias': '60 Dias' };
-    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
-       .text(condMap[data.cliente_condiciones] || 'Contado', cx + 10, y + 30);
-    doc.fontSize(9).font('Helvetica').fillColor(grisTexto)
-       .text('Vendedor:', cx + 10, y + 50);
-    doc.fillColor(negro)
-       .text(data.vendedor_nombre || 'N/A', cx + 70, y + 50, { width: blockW - 80 });
-    doc.fillColor(grisTexto)
-       .text('Negocio:', cx + 10, y + 65);
-    doc.fillColor(negro)
-       .text(data.cliente_negocio || 'N/A', cx + 70, y + 65, { width: blockW - 80 });
+    y += 50;
 
-    y += blockH + 18;
-
-    // TABLA - DISTRIBUCION COMPACTA EN 492pt
-    const colDescX = M + 8;
-    const colDescW = 170;
-    const colCantX = M + 188;
-    const colCantW = 35;
-    const colPUnitX = M + 230;
-    const colPUnitW = 55;
-    const colSubX = M + 290;
-    const colSubW = 55;
-    const colItbisX = M + 350;
-    const colItbisW = 45;
-    const colTotalX = M + 400;
-    const colTotalW = 80;
-
-    doc.rect(M, y, col, 24).fill(azulOscuro);
-    doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
-    doc.text('DESCRIPCION', colDescX, y + 8, { width: colDescW });
-    doc.text('CANT', colCantX, y + 8, { width: colCantW, align: 'right' });
-    doc.text('P. UNIT', colPUnitX, y + 8, { width: colPUnitW, align: 'right' });
-    doc.text('SUBTOTAL', colSubX, y + 8, { width: colSubW, align: 'right' });
-    doc.text('ITBIS', colItbisX, y + 8, { width: colItbisW, align: 'right' });
-    doc.text('TOTAL', colTotalX, y + 8, { width: colTotalW, align: 'right' });
+    // ============== INFO CLIENTE ==============
+    doc.fillColor(acento).fontSize(10).font('Helvetica-Bold')
+       .text('FACTURAR A', M, y);
+    doc.moveTo(M, y + 14).lineTo(M + 70, y + 14).strokeColor(acento).lineWidth(2).stroke();
+    
     y += 24;
+    
+    doc.fillColor(negro).fontSize(18).font('Helvetica-Bold')
+       .text(data.cliente_nombre || 'Consumidor Final', M, y, { width: col });
+    
+    y += 26;
+    
+    // Datos en grid 2x2
+    const labelW = 75;
+    const colDataW = (col - 30) / 2;
+    
+    // Fila 1
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica').text('RNC/Cédula:', M, y);
+    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
+       .text(data.rnc_cedula || 'N/A', M + labelW, y);
+    
+    const rx = M + colDataW + 30;
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica').text('Vendedor:', rx, y);
+    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
+       .text(data.vendedor_nombre || 'N/A', rx + labelW, y, { width: colDataW - labelW });
+    
+    y += 18;
+    
+    // Fila 2
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica').text('Teléfono:', M, y);
+    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
+       .text(data.cliente_telefono || 'N/A', M + labelW, y);
+    
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica').text('Negocio:', rx, y);
+    doc.fillColor(negro).fontSize(11).font('Helvetica-Bold')
+       .text(data.cliente_negocio || 'N/A', rx + labelW, y, { width: colDataW - labelW });
+    
+    y += 18;
+    
+    // Dirección (línea completa)
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica').text('Dirección:', M, y);
+    doc.fillColor(negro).fontSize(11).font('Helvetica')
+       .text(data.cliente_direccion || 'N/A', M + labelW, y, { width: col - labelW });
+    
+    y += 32;
 
-    doc.fontSize(9).font('Helvetica');
-    let rowColor = true;
+    // ============== TABLA DE ITEMS ==============
+    const tableX = M;
+    const tableW = col;
+    
+    // Distribución columnas (col = 532pt)
+    const cDescW = 200;
+    const cCantW = 50;
+    const cPrecioW = 75;
+    const cSubW = 75;
+    const cItbisW = 60;
+    const cTotalW = tableW - cDescW - cCantW - cPrecioW - cSubW - cItbisW;
+    
+    const cDescX = tableX;
+    const cCantX = cDescX + cDescW;
+    const cPrecioX = cCantX + cCantW;
+    const cSubX = cPrecioX + cPrecioW;
+    const cItbisX = cSubX + cSubW;
+    const cTotalX = cItbisX + cItbisW;
+    
+    // Header tabla
+    doc.rect(tableX, y, tableW, 32).fill(primario);
+    doc.fillColor(blanco).fontSize(10).font('Helvetica-Bold');
+    doc.text('DESCRIPCION', cDescX + 10, y + 11, { width: cDescW - 12 });
+    doc.text('CANT', cCantX, y + 11, { width: cCantW, align: 'center' });
+    doc.text('PRECIO', cPrecioX, y + 11, { width: cPrecioW - 6, align: 'right' });
+    doc.text('SUBTOTAL', cSubX, y + 11, { width: cSubW - 6, align: 'right' });
+    doc.text('ITBIS', cItbisX, y + 11, { width: cItbisW - 6, align: 'right' });
+    doc.text('TOTAL', cTotalX, y + 11, { width: cTotalW - 10, align: 'right' });
+    y += 32;
+    
+    // Filas
+    let rowAlt = false;
     for (const item of items.rows) {
-      const rowH = 22;
-      if (rowColor) doc.rect(M, y, col, rowH).fill(grisClaro);
-      rowColor = !rowColor;
+      const rowH = 28;
+      if (rowAlt) doc.rect(tableX, y, tableW, rowH).fill(grisFondo);
+      
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      doc.fillColor(negro)
-         .text(item.descripcion, colDescX, y + 7, { width: colDescW })
-         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 7, { width: colCantW, align: 'right' })
-         .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 7, { width: colPUnitW, align: 'right' })
-         .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 7, { width: colSubW, align: 'right' })
-         .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 7, { width: colItbisW, align: 'right' })
-         .text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), colTotalX, y + 7, { width: colTotalW, align: 'right' });
-      doc.moveTo(M, y + rowH).lineTo(M + col, y + rowH).strokeColor(grisBorde).lineWidth(0.5).stroke();
+      
+      doc.fillColor(negro).fontSize(10).font('Helvetica');
+      doc.text(item.descripcion, cDescX + 10, y + 9, { width: cDescW - 12 });
+      
+      doc.fontSize(11).font('Helvetica-Bold');
+      doc.text(parseFloat(item.cantidad).toFixed(0), cCantX, y + 9, { width: cCantW, align: 'center' });
+      
+      doc.fontSize(10).font('Helvetica');
+      doc.text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), cPrecioX, y + 9, { width: cPrecioW - 6, align: 'right' });
+      doc.text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), cSubX, y + 9, { width: cSubW - 6, align: 'right' });
+      doc.text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), cItbisX, y + 9, { width: cItbisW - 6, align: 'right' });
+      
+      doc.fontSize(11).font('Helvetica-Bold');
+      doc.text(parseFloat(item.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), cTotalX, y + 9, { width: cTotalW - 10, align: 'right' });
+      
+      doc.moveTo(tableX, y + rowH).lineTo(tableX + tableW, y + rowH).strokeColor(grisLinea).lineWidth(0.3).stroke();
+      
+      rowAlt = !rowAlt;
       y += rowH;
     }
+    
+    doc.moveTo(tableX, y).lineTo(tableX + tableW, y).strokeColor(primario).lineWidth(2).stroke();
+    y += 20;
 
-    doc.rect(M, y, col, 1.5).fill(azulOscuro);
-    y += 18;
-
-    // TOTALES
-    const tw = 220;
-    const tx = M + col - tw;
-    doc.rect(tx, y, tw, 22).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(10).font('Helvetica')
-       .text('Subtotal:', tx + 12, y + 7);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
+    // ============== TOTALES ==============
+    const totalesW = 280;
+    const totalesX = M + col - totalesW;
+    
+    // Subtotal
+    doc.fillColor(grisMedio).fontSize(11).font('Helvetica')
+       .text('Subtotal:', totalesX, y);
+    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y, { width: totalesW, align: 'right' });
     y += 22;
-    doc.rect(tx, y, tw, 22).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(10).font('Helvetica')
-       .text('ITBIS (18%):', tx + 12, y + 7);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
+    
+    // ITBIS
+    doc.fillColor(grisMedio).fontSize(11).font('Helvetica')
+       .text('ITBIS (18%):', totalesX, y);
+    doc.fillColor(negro).fontSize(12).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y, { width: totalesW, align: 'right' });
     y += 22;
-    doc.rect(tx, y, tw, 32).fill(azulOscuro);
-    doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
-       .text('TOTAL:', tx + 12, y + 9);
-    doc.fontSize(14)
-       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 9, { width: tw - 12, align: 'right' });
-    y += 42;
+    
+    // Línea
+    doc.moveTo(totalesX, y).lineTo(totalesX + totalesW, y).strokeColor(grisLinea).lineWidth(0.5).stroke();
+    y += 12;
+    
+    // TOTAL
+    doc.rect(totalesX, y, totalesW, 50).fill(primario);
+    doc.fillColor('#94A3B8').fontSize(10).font('Helvetica-Bold')
+       .text('TOTAL A PAGAR', totalesX + 16, y + 10);
+    doc.fillColor(blanco).fontSize(24).font('Helvetica-Bold')
+       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, totalesX, y + 22, { width: totalesW - 16, align: 'right' });
+    
+    y += 60;
 
-    // E-CF
+    // ============== E-CF (si aplica) ==============
     if (esElectronica) {
-      y += 8;
       const qrData = `https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=${data.empresa_rnc || ''}&ENCF=${data.ncf || ''}&MontoTotal=${parseFloat(data.total).toFixed(2)}&FechaEmision=${data.fecha_emision ? new Date(data.fecha_emision).toISOString().split('T')[0] : ''}&CodigoSeguridad=${data.codigo_seguridad || ''}`;
       try {
-        const qrPng = await QRCode.toBuffer(qrData, { width: 130, margin: 1 });
-        doc.rect(M, y, col, 130).fill(grisFondo).stroke(grisBorde);
-        doc.image(qrPng, M + 10, y + 10, { width: 110, height: 110 });
-        const infoX = M + 135;
-        doc.fillColor(azulOscuro).fontSize(11).font('Helvetica-Bold')
-           .text('VALIDACION DGII (e-CF)', infoX, y + 12);
-        doc.fillColor(negro).fontSize(9).font('Helvetica')
-           .text(`eNCF: ${data.ncf || '-'}`, infoX, y + 32)
-           .text(`Codigo Seguridad: ${data.codigo_seguridad || '-'}`, infoX, y + 48)
-           .text(`Fecha Firma: ${data.fecha_firma_digital ? new Date(data.fecha_firma_digital).toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo' }) : '-'}`, infoX, y + 64)
-           .text(`Vence eNCF: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, infoX, y + 80);
-        doc.fillColor(grisTexto).fontSize(8).font('Helvetica-Oblique')
-           .text('Escanee el QR para validar en DGII', infoX, y + 105, { width: col - 145 });
-        y += 140;
+        const qrPng = await QRCode.toBuffer(qrData, { width: 150, margin: 1 });
+        
+        // Caja completa
+        doc.rect(M, y, col, 130).fill(grisFondo).stroke(grisLinea);
+        
+        // QR
+        doc.image(qrPng, M + 15, y + 15, { width: 100, height: 100 });
+        
+        // Info
+        const infoX = M + 130;
+        doc.fillColor(acento).fontSize(13).font('Helvetica-Bold')
+           .text('VALIDACION DGII', infoX, y + 18);
+        doc.fillColor(negro).fontSize(10).font('Helvetica');
+        doc.text(`eNCF: ${data.ncf || '-'}`, infoX, y + 40);
+        doc.text(`Código de Seguridad: ${data.codigo_seguridad || '-'}`, infoX, y + 56);
+        doc.text(`Fecha Firma: ${data.fecha_firma_digital ? new Date(data.fecha_firma_digital).toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo' }) : '-'}`, infoX, y + 72);
+        doc.text(`Vence eNCF: ${data.fecha_vencimiento_encf ? new Date(data.fecha_vencimiento_encf).toLocaleDateString('es-DO') : '-'}`, infoX, y + 88);
+        doc.fillColor(grisMedio).fontSize(9).font('Helvetica-Oblique')
+           .text('Escanee el código QR para validar el comprobante en DGII', infoX, y + 108, { width: col - 145 });
+        
+        y += 145;
       } catch (qrError) {
-        doc.fillColor('#EF4444').fontSize(9).text('Error generando QR', M, y);
-        y += 14;
+        // continuar sin QR
       }
-      doc.fillColor(grisTexto).fontSize(9).font('Helvetica-Oblique')
-         .text('Representacion Impresa del e-CF (Comprobante Fiscal Electronico)', M, y, { width: col, align: 'center' });
-      y += 16;
     }
 
-    // FOOTER
-    doc.moveTo(M, y).lineTo(M + col, y).strokeColor(grisBorde).lineWidth(0.5).stroke();
-    y += 12;
-    doc.fillColor(azulOscuro).fontSize(11).font('Helvetica-Bold')
-       .text('Gracias por su preferencia', M, y, { width: col, align: 'center' });
-    y += 16;
-    doc.fillColor(grisTexto).fontSize(8).font('Helvetica')
-       .text('Este documento es valido como comprobante fiscal', M, y, { width: col, align: 'center' });
+    // ============== FOOTER ==============
+    const footerY = H - 50;
+    
+    // Banda
+    doc.rect(0, footerY - 12, W, 3).fill(acento);
+    
+    doc.fillColor(primario).fontSize(13).font('Helvetica-Bold')
+       .text('Gracias por su preferencia', M, footerY, { width: col, align: 'center' });
+    doc.fillColor(grisMedio).fontSize(9).font('Helvetica')
+       .text('Este documento es válido como comprobante fiscal', M, footerY + 18, { width: col, align: 'center' });
 
     doc.end();
   } catch (error) {
