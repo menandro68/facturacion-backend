@@ -767,7 +767,8 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF MEDIA CARTA - 8.5 x 5.5 (612 x 396) - MISMA LOGICA QUE CARTA ENTERA
+// PDF MEDIA CARTA - SOLUCION PROFESIONAL: Carta estandar 612x792 con factura en mitad superior
+// El usuario imprime en hoja Carta normal y corta a la mitad. Compatible con cualquier impresora.
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -789,8 +790,8 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    // MISMA configuracion que Carta Entera, solo cambia alto: 792 -> 396
-    const doc = new PDFDocument({ margin: 60, size: [396, 612], layout: 'landscape' });
+    // PDF Carta estandar - factura en mitad superior, mitad inferior para corte
+    const doc = new PDFDocument({ margin: 60, size: [612, 792] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
       'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
@@ -801,7 +802,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
 
-    // CONFIGURACION (IDENTICA A CARTA ENTERA)
+    // CONFIGURACION
     const W = 612;
     const M = 60;
     const col = W - M * 2;  // 492pt utilizables
@@ -815,7 +816,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const negro = '#0F172A';
     const grisTexto = '#64748B';
 
-    // ENCABEZADO (compacto: 65 en lugar de 95)
+    // ENCABEZADO (compacto)
     doc.rect(0, 0, W, 65).fill(azulOscuro);
     doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
        .text(data.empresa_nombre || 'MI EMPRESA', M, 14, { width: col / 2 });
@@ -839,7 +840,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       y += 22;
     }
 
-    // BLOQUES CLIENTE / CONDICIONES (compactos: 70 en lugar de 100)
+    // BLOQUES CLIENTE / CONDICIONES
     const blockH = 70;
     const gap = 12;
     const blockW = (col - gap) / 2;
@@ -882,7 +883,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     y += blockH + 10;
 
-    // TABLA - DISTRIBUCION COMPACTA EN 492pt (IGUAL A CARTA ENTERA)
+    // TABLA
     const colDescX = M + 8;
     const colDescW = 170;
     const colCantX = M + 188;
@@ -927,7 +928,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.rect(M, y, col, 1.5).fill(azulOscuro);
     y += 8;
 
-    // TOTALES (compactos)
+    // TOTALES
     const tw = 220;
     const tx = M + col - tw;
     doc.rect(tx, y, tw, 16).fill(grisFondo).stroke(grisBorde);
@@ -947,6 +948,18 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
        .text('TOTAL:', tx + 12, y + 7);
     doc.fontSize(12)
        .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 12, align: 'right' });
+
+    // LINEA DE CORTE en la mitad de la hoja (396pt)
+    const lineaCorteY = 396;
+    doc.save();
+    doc.dash(4, { space: 3 });
+    doc.moveTo(M, lineaCorteY).lineTo(M + col, lineaCorteY).strokeColor(grisBorde).lineWidth(0.8).stroke();
+    doc.undash();
+    doc.restore();
+    
+    // Indicador de corte (tijera y texto)
+    doc.fillColor(grisTexto).fontSize(7).font('Helvetica')
+       .text('  CORTAR AQUI  ', M + col / 2 - 35, lineaCorteY - 4, { width: 70, align: 'center' });
 
     doc.end();
   } catch (error) {
