@@ -790,7 +790,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
     // MISMA configuracion que Carta Entera, solo cambia alto: 792 -> 396
-    const doc = new PDFDocument({ margin: 60, size: [612, 396] });
+   const doc = new PDFDocument({ margin: 60, size: [612, 396], layout: 'landscape' });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
       'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
