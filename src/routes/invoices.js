@@ -791,7 +791,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const PDFDocument = require('pdfkit');
     // Media Carta horizontal: 8.5 ancho x 5.5 alto = 612 x 396
     // bufferPages + autoFirstPage para controlar paginas
-    const doc = new PDFDocument({ margin: 0, size: [612, 396], bufferPages: true });
+    const doc = new PDFDocument({ margin: 30, size: [612, 396] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
       'E31': 'FACTURA CREDITO FISCAL ELECTRONICA',
