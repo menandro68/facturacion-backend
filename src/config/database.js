@@ -521,6 +521,65 @@ const createTables = async () => {
     `);
     console.log('Columna primer_login agregada a users');
 
+    // ============================================================
+    // MIGRACION: Numero de factura consecutivo por tenant
+    // ============================================================
+
+    // 1. Agregar columna numero_factura a invoices (no destructivo)
+    await pool.query(`
+      ALTER TABLE invoices
+        ADD COLUMN IF NOT EXISTS numero_factura INTEGER
+    `);
+
+    // 2. Crear tabla contador secuencial por tenant
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tenant_invoice_counter (
+        tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+        ultimo_numero INTEGER NOT NULL DEFAULT 0,
+        actualizado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    // 3. Indice para busquedas rapidas
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_invoices_numero_tenant
+      ON invoices(tenant_id, numero_factura)
+    `);
+
+    // 4. Backfill: asignar numeros a facturas existentes sin numero (orden cronologico por tenant)
+    const facturasSinNumero = await pool.query(`
+      SELECT COUNT(*) as total FROM invoices WHERE numero_factura IS NULL
+    `);
+
+    if (parseInt(facturasSinNumero.rows[0].total) > 0) {
+      await pool.query(`
+        WITH numeradas AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (PARTITION BY tenant_id ORDER BY creado_en ASC) as nuevo_numero
+          FROM invoices
+          WHERE numero_factura IS NULL
+        )
+        UPDATE invoices i
+        SET numero_factura = n.nuevo_numero
+        FROM numeradas n
+        WHERE i.id = n.id
+      `);
+      console.log('✅ Backfill: numeros asignados a facturas existentes');
+    }
+
+    // 5. Inicializar contador con el ultimo numero usado por cada tenant
+    await pool.query(`
+      INSERT INTO tenant_invoice_counter (tenant_id, ultimo_numero)
+      SELECT tenant_id, COALESCE(MAX(numero_factura), 0)
+      FROM invoices
+      GROUP BY tenant_id
+      ON CONFLICT (tenant_id) DO UPDATE
+        SET ultimo_numero = GREATEST(tenant_invoice_counter.ultimo_numero, EXCLUDED.ultimo_numero),
+            actualizado_en = NOW()
+    `);
+
+    console.log('✅ Migracion numero_factura completada');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);
