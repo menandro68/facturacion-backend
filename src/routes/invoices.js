@@ -767,8 +767,9 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// PDF MEDIA CARTA - SOLUCION PROFESIONAL: Carta estandar 612x792 con factura en mitad superior
-// El usuario imprime en hoja Carta normal y corta a la mitad. Compatible con cualquier impresora.
+// PDF MEDIA CARTA - PROFESIONAL: Carta estandar 612x792 con factura en mitad superior
+// Soporta MULTIPLES PAGINAS: cuando los items sobrepasan la mitad superior, salta a nueva pagina
+// Totales SOLO en la ultima pagina. Linea de corte en cada pagina.
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -790,7 +791,6 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const items = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id]);
     const data = invoice.rows[0];
     const PDFDocument = require('pdfkit');
-    // PDF Carta estandar - factura en mitad superior, mitad inferior para corte
     const doc = new PDFDocument({ margin: 60, size: [612, 792] });
     const esElectronica = ['E31', 'E32', 'E34'].includes(data.ncf_tipo);
     const tituloDocumento = {
@@ -805,9 +805,11 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     // CONFIGURACION
     const W = 612;
     const M = 60;
-    const col = W - M * 2;  // 492pt utilizables
+    const col = W - M * 2;
+    const LIMITE_MITAD = 396;  // Mitad superior de la hoja Carta (5.5 pulgadas)
+    const ALTURA_TOTALES = 80; // Espacio reservado para totales en la ultima pagina
 
-    // Paleta profesional (IGUAL A CARTA ENTERA)
+    // Paleta profesional
     const azulOscuro = '#1E3A8A';
     const azulMedio = '#3B82F6';
     const grisClaro = '#F8FAFC';
@@ -816,74 +818,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const negro = '#0F172A';
     const grisTexto = '#64748B';
 
-    // ENCABEZADO (compacto)
-    doc.rect(0, 0, W, 65).fill(azulOscuro);
-    doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
-       .text(data.empresa_nombre || 'MI EMPRESA', M, 14, { width: col / 2 });
-    doc.fontSize(8).font('Helvetica')
-       .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 38, { width: col / 2 });
-    doc.fontSize(8).text(data.empresa_email || '', M, 50, { width: col / 2 });
-    const rightX = M + col / 2;
-    const rightW = col / 2;
-    doc.fillColor('white').fontSize(esElectronica ? 10 : 13).font('Helvetica-Bold')
-       .text(tituloDocumento, rightX, 14, { width: rightW, align: 'right' });
-    doc.fontSize(9).font('Helvetica')
-       .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 32, { width: rightW, align: 'right' });
-    doc.fontSize(8).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 44, { width: rightW, align: 'right' });
-    doc.fontSize(8).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 54, { width: rightW, align: 'right' });
-
-    let y = 72;
-    if (data.numero_factura) {
-      doc.rect(M, y, col, 16).fill(azulMedio);
-      doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
-         .text(`FACTURA No.: ${String(data.numero_factura).padStart(8, '0')}`, M + 8, y + 4, { width: col - 16, align: 'right' });
-      y += 22;
-    }
-
-    // BLOQUES CLIENTE / CONDICIONES
-    const blockH = 70;
-    const gap = 12;
-    const blockW = (col - gap) / 2;
-
-    doc.rect(M, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
-    doc.rect(M, y, blockW, 16).fill(azulOscuro);
-    doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
-       .text('CLIENTE', M + 8, y + 4);
-    doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
-       .text(data.cliente_nombre || 'Consumidor Final', M + 8, y + 20, { width: blockW - 16 });
-    doc.fontSize(8).font('Helvetica').fillColor(grisTexto)
-       .text('RNC/Cedula:', M + 8, y + 36);
-    doc.fillColor(negro)
-       .text(data.rnc_cedula || 'N/A', M + 60, y + 36);
-    doc.fillColor(grisTexto)
-       .text('Tel:', M + 8, y + 48);
-    doc.fillColor(negro)
-       .text(data.cliente_telefono || 'N/A', M + 60, y + 48);
-    doc.fillColor(grisTexto)
-       .text('Dir:', M + 8, y + 60);
-    doc.fillColor(negro)
-       .text(data.cliente_direccion || 'N/A', M + 60, y + 60, { width: blockW - 68 });
-
-    const cx = M + blockW + gap;
-    doc.rect(cx, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
-    doc.rect(cx, y, blockW, 16).fill(azulOscuro);
-    doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
-       .text('CONDICIONES DE PAGO', cx + 8, y + 4);
-    const condMap = { contado: 'Contado', '7_dias': '7 Dias', '15_dias': '15 Dias', '30_dias': '30 Dias', '45_dias': '45 Dias', '60_dias': '60 Dias' };
-    doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
-       .text(condMap[data.cliente_condiciones] || 'Contado', cx + 8, y + 20);
-    doc.fontSize(8).font('Helvetica').fillColor(grisTexto)
-       .text('Vendedor:', cx + 8, y + 36);
-    doc.fillColor(negro)
-       .text(data.vendedor_nombre || 'N/A', cx + 60, y + 36, { width: blockW - 68 });
-    doc.fillColor(grisTexto)
-       .text('Negocio:', cx + 8, y + 48);
-    doc.fillColor(negro)
-       .text(data.cliente_negocio || 'N/A', cx + 60, y + 48, { width: blockW - 68 });
-
-    y += blockH + 10;
-
-    // TABLA
+    // Distribucion de columnas
     const colDescX = M + 8;
     const colDescW = 170;
     const colCantX = M + 188;
@@ -897,20 +832,141 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const colTotalX = M + 400;
     const colTotalW = 80;
 
-    doc.rect(M, y, col, 18).fill(azulOscuro);
-    doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
-    doc.text('DESCRIPCION', colDescX, y + 5, { width: colDescW });
-    doc.text('CANT', colCantX, y + 5, { width: colCantW, align: 'right' });
-    doc.text('P. UNIT', colPUnitX, y + 5, { width: colPUnitW, align: 'right' });
-    doc.text('SUBTOTAL', colSubX, y + 5, { width: colSubW, align: 'right' });
-    doc.text('ITBIS', colItbisX, y + 5, { width: colItbisW, align: 'right' });
-    doc.text('TOTAL', colTotalX, y + 5, { width: colTotalW, align: 'right' });
-    y += 18;
+    // FUNCION: Dibujar encabezado completo (primera pagina)
+    const dibujarEncabezadoCompleto = () => {
+      doc.rect(0, 0, W, 65).fill(azulOscuro);
+      doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
+         .text(data.empresa_nombre || 'MI EMPRESA', M, 14, { width: col / 2 });
+      doc.fontSize(8).font('Helvetica')
+         .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 38, { width: col / 2 });
+      doc.fontSize(8).text(data.empresa_email || '', M, 50, { width: col / 2 });
+      const rightX = M + col / 2;
+      const rightW = col / 2;
+      doc.fillColor('white').fontSize(esElectronica ? 10 : 13).font('Helvetica-Bold')
+         .text(tituloDocumento, rightX, 14, { width: rightW, align: 'right' });
+      doc.fontSize(9).font('Helvetica')
+         .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 32, { width: rightW, align: 'right' });
+      doc.fontSize(8).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 44, { width: rightW, align: 'right' });
+      doc.fontSize(8).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 54, { width: rightW, align: 'right' });
 
+      let y = 72;
+      if (data.numero_factura) {
+        doc.rect(M, y, col, 16).fill(azulMedio);
+        doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+           .text(`FACTURA No.: ${String(data.numero_factura).padStart(8, '0')}`, M + 8, y + 4, { width: col - 16, align: 'right' });
+        y += 22;
+      }
+
+      // BLOQUES CLIENTE / CONDICIONES
+      const blockH = 70;
+      const gap = 12;
+      const blockW = (col - gap) / 2;
+
+      doc.rect(M, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
+      doc.rect(M, y, blockW, 16).fill(azulOscuro);
+      doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+         .text('CLIENTE', M + 8, y + 4);
+      doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
+         .text(data.cliente_nombre || 'Consumidor Final', M + 8, y + 20, { width: blockW - 16 });
+      doc.fontSize(8).font('Helvetica').fillColor(grisTexto)
+         .text('RNC/Cedula:', M + 8, y + 36);
+      doc.fillColor(negro)
+         .text(data.rnc_cedula || 'N/A', M + 60, y + 36);
+      doc.fillColor(grisTexto)
+         .text('Tel:', M + 8, y + 48);
+      doc.fillColor(negro)
+         .text(data.cliente_telefono || 'N/A', M + 60, y + 48);
+      doc.fillColor(grisTexto)
+         .text('Dir:', M + 8, y + 60);
+      doc.fillColor(negro)
+         .text(data.cliente_direccion || 'N/A', M + 60, y + 60, { width: blockW - 68 });
+
+      const cx = M + blockW + gap;
+      doc.rect(cx, y, blockW, blockH).fill(grisFondo).stroke(grisBorde);
+      doc.rect(cx, y, blockW, 16).fill(azulOscuro);
+      doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
+         .text('CONDICIONES DE PAGO', cx + 8, y + 4);
+      const condMap = { contado: 'Contado', '7_dias': '7 Dias', '15_dias': '15 Dias', '30_dias': '30 Dias', '45_dias': '45 Dias', '60_dias': '60 Dias' };
+      doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
+         .text(condMap[data.cliente_condiciones] || 'Contado', cx + 8, y + 20);
+      doc.fontSize(8).font('Helvetica').fillColor(grisTexto)
+         .text('Vendedor:', cx + 8, y + 36);
+      doc.fillColor(negro)
+         .text(data.vendedor_nombre || 'N/A', cx + 60, y + 36, { width: blockW - 68 });
+      doc.fillColor(grisTexto)
+         .text('Negocio:', cx + 8, y + 48);
+      doc.fillColor(negro)
+         .text(data.cliente_negocio || 'N/A', cx + 60, y + 48, { width: blockW - 68 });
+
+      return y + blockH + 10;  // Retorna Y donde empieza la tabla
+    };
+
+    // FUNCION: Dibujar encabezado mini (paginas 2 en adelante)
+    const dibujarEncabezadoMini = () => {
+      doc.rect(0, 0, W, 35).fill(azulOscuro);
+      doc.fillColor('white').fontSize(12).font('Helvetica-Bold')
+         .text(`${data.empresa_nombre || 'MI EMPRESA'} - ${tituloDocumento}`, M, 8, { width: col / 2 });
+      doc.fontSize(8).font('Helvetica')
+         .text(`NCF: ${data.ncf || 'N/A'}`, M, 24);
+      doc.fontSize(9).font('Helvetica-Bold')
+         .text(`Cliente: ${data.cliente_nombre || 'Consumidor Final'}`, M + col / 2, 8, { width: col / 2, align: 'right' });
+      if (data.numero_factura) {
+        doc.fontSize(8).font('Helvetica')
+           .text(`Factura No.: ${String(data.numero_factura).padStart(8, '0')}`, M + col / 2, 24, { width: col / 2, align: 'right' });
+      }
+      return 45;  // Retorna Y donde empieza la tabla
+    };
+
+    // FUNCION: Dibujar header de tabla
+    const dibujarHeaderTabla = (y) => {
+      doc.rect(M, y, col, 18).fill(azulOscuro);
+      doc.fillColor('white').fontSize(9).font('Helvetica-Bold');
+      doc.text('DESCRIPCION', colDescX, y + 5, { width: colDescW });
+      doc.text('CANT', colCantX, y + 5, { width: colCantW, align: 'right' });
+      doc.text('P. UNIT', colPUnitX, y + 5, { width: colPUnitW, align: 'right' });
+      doc.text('SUBTOTAL', colSubX, y + 5, { width: colSubW, align: 'right' });
+      doc.text('ITBIS', colItbisX, y + 5, { width: colItbisW, align: 'right' });
+      doc.text('TOTAL', colTotalX, y + 5, { width: colTotalW, align: 'right' });
+      return y + 18;
+    };
+
+    // FUNCION: Dibujar linea de corte en y=396
+    const dibujarLineaCorte = () => {
+      doc.save();
+      doc.dash(4, { space: 3 });
+      doc.moveTo(M, LIMITE_MITAD).lineTo(M + col, LIMITE_MITAD).strokeColor(grisBorde).lineWidth(0.8).stroke();
+      doc.undash();
+      doc.restore();
+      doc.fillColor(grisTexto).fontSize(7).font('Helvetica')
+         .text('  CORTAR AQUI  ', M + col / 2 - 35, LIMITE_MITAD - 4, { width: 70, align: 'center' });
+    };
+
+    // ============= INICIO RENDERIZADO =============
+    let y = dibujarEncabezadoCompleto();
+    y = dibujarHeaderTabla(y);
     doc.fontSize(9).font('Helvetica');
     let rowColor = true;
-    for (const item of items.rows) {
-      const rowH = 16;
+
+    const rowH = 16;
+    const totalItems = items.rows.length;
+
+    for (let idx = 0; idx < totalItems; idx++) {
+      const item = items.rows[idx];
+      const esUltimoItem = (idx === totalItems - 1);
+      const espacioNecesario = esUltimoItem ? (rowH + ALTURA_TOTALES) : rowH;
+
+      // Verificar si la fila cabe en la mitad superior
+      if (y + espacioNecesario > LIMITE_MITAD - 5) {
+        // No cabe: dibujar linea de corte y crear nueva pagina
+        dibujarLineaCorte();
+        doc.addPage();
+        y = dibujarEncabezadoMini();
+        y = dibujarHeaderTabla(y);
+        doc.fontSize(9).font('Helvetica');
+        rowColor = true;
+      }
+
+      // Dibujar fila
       if (rowColor) doc.rect(M, y, col, rowH).fill(grisClaro);
       rowColor = !rowColor;
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
@@ -925,10 +981,11 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       y += rowH;
     }
 
+    // Linea separadora antes de totales
     doc.rect(M, y, col, 1.5).fill(azulOscuro);
     y += 8;
 
-    // TOTALES
+    // TOTALES (solo en la ultima pagina)
     const tw = 220;
     const tx = M + col - tw;
     doc.rect(tx, y, tw, 16).fill(grisFondo).stroke(grisBorde);
@@ -949,17 +1006,8 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.fontSize(12)
        .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 12, align: 'right' });
 
-    // LINEA DE CORTE en la mitad de la hoja (396pt)
-    const lineaCorteY = 396;
-    doc.save();
-    doc.dash(4, { space: 3 });
-    doc.moveTo(M, lineaCorteY).lineTo(M + col, lineaCorteY).strokeColor(grisBorde).lineWidth(0.8).stroke();
-    doc.undash();
-    doc.restore();
-    
-    // Indicador de corte (tijera y texto)
-    doc.fillColor(grisTexto).fontSize(7).font('Helvetica')
-       .text('  CORTAR AQUI  ', M + col / 2 - 35, lineaCorteY - 4, { width: 70, align: 'center' });
+    // Linea de corte en la ultima pagina
+    dibujarLineaCorte();
 
     doc.end();
   } catch (error) {
