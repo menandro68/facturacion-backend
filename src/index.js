@@ -71,6 +71,41 @@ app.use('/devoluciones', devolucionesRoutes);
 app.use('/operadores', operadoresRoutes);
 app.use('/super-admin', superAdminRoutes);
 
+// === HEALTH CHECK PARA MONITOREO DE RAILWAY (LIVENESS) ===
+// Endpoint de "liveness check" estándar profesional (Kubernetes/Cloud Run/AWS).
+// Solo verifica que el proceso Node.js está vivo y respondiendo HTTP.
+// NO depende de la base de datos: si la BD se cae, el servidor sigue siendo
+// "saludable" (la BD se reconectará sola gracias al pool con reintentos).
+// Esto evita que Railway reinicie el container por problemas transitorios de BD.
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime())
+  });
+});
+
+// === READINESS CHECK (para diagnóstico manual, no para Railway) ===
+// Verifica si el sistema está listo para recibir tráfico (incluye BD).
+// Útil para que TÚ revises manualmente si la BD responde.
+app.get('/ready', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.status(200).json({
+      status: 'ready',
+      database: 'ok',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'not_ready',
+      database: 'error',
+      timestamp: new Date().toISOString(),
+      error: 'Base de datos no disponible'
+    });
+  }
+});
+
 // SPA - servir index.html con no-cache
 app.get('/{*path}', (req, res) => {
   if (!req.path.startsWith('/auth') && !req.path.startsWith('/invoices') && 
@@ -80,7 +115,7 @@ app.get('/{*path}', (req, res) => {
       !req.path.startsWith('/accounts') && !req.path.startsWith('/mantenimiento') &&
       !req.path.startsWith('/purchase') && !req.path.startsWith('/tenant') &&
    !req.path.startsWith('/devoluciones') && !req.path.startsWith('/operadores') &&
-      !req.path.startsWith('/db-test')) {
+      !req.path.startsWith('/db-test') && !req.path.startsWith('/health')) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.setHeader('Pragma', 'no-cache')
     res.setHeader('Expires', '0')
