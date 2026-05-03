@@ -31,12 +31,16 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json());
 
-// Rate limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100
+// Rate limiter SOLO para autenticación (anti brute-force)
+// El resto del sistema NO tiene límite para no afectar a clientes empresariales con múltiples operadores
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 20, // 20 intentos fallidos cada 15 min por IP
+  message: { error: 'Demasiados intentos de inicio de sesión. Intenta de nuevo en 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true // Los logins exitosos NO cuentan
 });
-app.use(limiter);
 
 // Archivos estáticos
 app.use(express.static(path.join(__dirname, '../public'), {
@@ -50,7 +54,7 @@ app.use(express.static(path.join(__dirname, '../public'), {
 }))
 
 // Rutas
-app.use('/auth', authRoutes);
+app.use('/auth', authLimiter, authRoutes);
 app.use('/tenant', tenantRoutes);
 app.use('/customers', customerRoutes);
 app.use('/products', productRoutes);
@@ -100,8 +104,50 @@ app.get('/db-test', async (req, res) => {
   }
 });
 
+// === MIDDLEWARE CENTRAL DE ERRORES ===
+// Captura cualquier error no manejado en las rutas y devuelve respuesta JSON limpia
+// Loguea el error completo en consola para diagnóstico (visible en logs de Railway)
+app.use((err, req, res, next) => {
+  console.error('❌ Error capturado:', {
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    method: req.method,
+    message: err.message,
+    stack: err.stack
+  });
+
+  // Si las cabeceras ya fueron enviadas, delegar al manejador por defecto de Express
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  res.status(err.status || 500).json({
+    mensaje: 'Ha ocurrido un error en el servidor',
+    error: process.env.NODE_ENV === 'production' ? 'Error interno' : err.message
+  });
+});
+
 // Crear tablas al iniciar
 createTables();
+
+// === MANEJADORES GLOBALES DE ERRORES DEL PROCESO ===
+// Capturan errores fuera del ciclo request/response y mantienen el servidor vivo
+// (en lugar de crashear y dejar a todas las empresas sin servicio)
+process.on('uncaughtException', (err) => {
+  console.error('❌ uncaughtException:', {
+    timestamp: new Date().toISOString(),
+    message: err.message,
+    stack: err.stack
+  });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ unhandledRejection:', {
+    timestamp: new Date().toISOString(),
+    reason: reason instanceof Error ? reason.message : reason,
+    stack: reason instanceof Error ? reason.stack : null
+  });
+});
 
 // Puerto
 const PORT = process.env.PORT || 3000;
