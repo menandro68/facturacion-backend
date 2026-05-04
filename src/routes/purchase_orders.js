@@ -152,19 +152,32 @@ router.put('/:id/estado', async (req, res) => {
       for (const item of items.rows) {
         if (!item.product_id) continue
 
-        // Actualizar costo del producto si el precio_unitario de esta OC es diferente
+        // Actualizar costo y precio de venta del producto si el precio_unitario de esta OC es diferente
         const prodActual = await client.query(
-          'SELECT costo FROM products WHERE id=$1 AND tenant_id=$2',
+          'SELECT costo, beneficio FROM products WHERE id=$1 AND tenant_id=$2',
           [item.product_id, tenant_id]
         )
         if (prodActual.rows.length > 0) {
           const costoActual = parseFloat(prodActual.rows[0].costo || 0)
           const costoNuevo = parseFloat(item.precio_unitario || 0)
           if (costoNuevo > 0 && costoActual !== costoNuevo) {
-            await client.query(
-              'UPDATE products SET costo=$1 WHERE id=$2 AND tenant_id=$3',
-              [costoNuevo, item.product_id, tenant_id]
-            )
+            const beneficio = parseFloat(prodActual.rows[0].beneficio || 0)
+            // Recalcular precio de venta con la misma formula del frontend: precio = costo + (costo × beneficio / 100)
+            const precioNuevo = beneficio > 0
+              ? parseFloat((costoNuevo + (costoNuevo * beneficio / 100)).toFixed(2))
+              : null
+
+            if (precioNuevo !== null) {
+              await client.query(
+                'UPDATE products SET costo=$1, precio=$2 WHERE id=$3 AND tenant_id=$4',
+                [costoNuevo, precioNuevo, item.product_id, tenant_id]
+              )
+            } else {
+              await client.query(
+                'UPDATE products SET costo=$1 WHERE id=$2 AND tenant_id=$3',
+                [costoNuevo, item.product_id, tenant_id]
+              )
+            }
           }
         }
 
