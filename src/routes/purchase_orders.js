@@ -133,11 +133,16 @@ router.put('/:id/estado', async (req, res) => {
     const tenant_id = req.user.tenant_id
     const id = req.params.id
 
-    // Verificar estado anterior
+    // Verificar estado anterior y obtener nombre del proveedor
     const ordenActual = await client.query(
-      'SELECT estado FROM purchase_orders WHERE id=$1 AND tenant_id=$2', [id, tenant_id]
+      `SELECT po.estado, s.nombre as proveedor_nombre
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON po.supplier_id = s.id
+       WHERE po.id=$1 AND po.tenant_id=$2`,
+      [id, tenant_id]
     )
     if (!ordenActual.rows[0]) return res.status(404).json({ mensaje: 'Orden no encontrada' })
+    const proveedorNombre = ordenActual.rows[0].proveedor_nombre || null
 
     await client.query(
       'UPDATE purchase_orders SET estado=$1 WHERE id=$2 AND tenant_id=$3',
@@ -169,15 +174,21 @@ router.put('/:id/estado', async (req, res) => {
 
             if (precioNuevo !== null) {
               await client.query(
-                'UPDATE products SET costo=$1, precio=$2 WHERE id=$3 AND tenant_id=$4',
-                [costoNuevo, precioNuevo, item.product_id, tenant_id]
+                'UPDATE products SET costo=$1, precio=$2, suplidor=$3 WHERE id=$4 AND tenant_id=$5',
+                [costoNuevo, precioNuevo, proveedorNombre, item.product_id, tenant_id]
               )
             } else {
               await client.query(
-                'UPDATE products SET costo=$1 WHERE id=$2 AND tenant_id=$3',
-                [costoNuevo, item.product_id, tenant_id]
+                'UPDATE products SET costo=$1, suplidor=$2 WHERE id=$3 AND tenant_id=$4',
+                [costoNuevo, proveedorNombre, item.product_id, tenant_id]
               )
             }
+          } else if (proveedorNombre) {
+            // Si el costo no cambió pero hay proveedor, igual actualizar el suplidor
+            await client.query(
+              'UPDATE products SET suplidor=$1 WHERE id=$2 AND tenant_id=$3',
+              [proveedorNombre, item.product_id, tenant_id]
+            )
           }
         }
 
