@@ -151,6 +151,23 @@ router.put('/:id/estado', async (req, res) => {
       )
       for (const item of items.rows) {
         if (!item.product_id) continue
+
+        // Actualizar costo del producto si el precio_unitario de esta OC es diferente
+        const prodActual = await client.query(
+          'SELECT costo FROM products WHERE id=$1 AND tenant_id=$2',
+          [item.product_id, tenant_id]
+        )
+        if (prodActual.rows.length > 0) {
+          const costoActual = parseFloat(prodActual.rows[0].costo || 0)
+          const costoNuevo = parseFloat(item.precio_unitario || 0)
+          if (costoNuevo > 0 && costoActual !== costoNuevo) {
+            await client.query(
+              'UPDATE products SET costo=$1 WHERE id=$2 AND tenant_id=$3',
+              [costoNuevo, item.product_id, tenant_id]
+            )
+          }
+        }
+
         const inv = await client.query(
           'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
           [item.product_id, tenant_id]
