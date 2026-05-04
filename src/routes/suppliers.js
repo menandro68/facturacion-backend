@@ -69,11 +69,29 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
-// DELETE - Eliminar proveedor (soft delete)
+// DELETE - Eliminar proveedor (soft delete) — VALIDA QUE NO TENGA OC PENDIENTES POR PAGAR
 router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
+
+    // Validar que el proveedor NO tenga órdenes de compra pendientes por pagar
+    const deudaCheck = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM purchase_orders
+       WHERE supplier_id = $1
+         AND tenant_id = $2
+         AND COALESCE(estado_pago, 'pendiente') <> 'pagada'`,
+      [id, tenant_id]
+    );
+
+    if (parseInt(deudaCheck.rows[0].total, 10) > 0) {
+      return res.status(400).json({
+        success: false,
+        mensaje: 'No se puede eliminar este proveedor porque tiene órdenes de compra pendientes por pagar.'
+      });
+    }
+
     await pool.query(
       `UPDATE suppliers SET estado='inactivo', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
