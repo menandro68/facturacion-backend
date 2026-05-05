@@ -580,6 +580,13 @@ const createTables = async () => {
 
     console.log('✅ Migracion numero_factura completada');
 
+    // Migracion: agregar columna chofer_id a invoices (entrega chofer)
+    await pool.query(`
+      ALTER TABLE invoices
+      ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL
+    `);
+    console.log('✅ Columna chofer_id agregada a invoices');
+
     console.log('🎉 Base de datos lista');
   } catch (error) {
     console.error('❌ Error creando tablas:', error.message);

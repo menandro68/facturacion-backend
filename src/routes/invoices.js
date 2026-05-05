@@ -1243,4 +1243,186 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// =====================================================
+// ENDPOINT ASIGNAR CHOFER A FACTURA (Entrega Chofer)
+// =====================================================
+router.put('/:id/asignar-chofer', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const { chofer_id } = req.body;
+
+    if (!chofer_id) {
+      return res.status(400).json({ success: false, mensaje: 'Debe seleccionar un chofer' });
+    }
+
+    const factura = await pool.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`,
+      [id, tenant_id]
+    );
+    if (factura.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' });
+    }
+
+    const chofer = await pool.query(
+      `SELECT * FROM choferes WHERE id=$1 AND tenant_id=$2`,
+      [chofer_id, tenant_id]
+    );
+    if (chofer.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Chofer no encontrado' });
+    }
+
+    const result = await pool.query(
+      `UPDATE invoices SET chofer_id=$1, actualizado_en=NOW() WHERE id=$2 RETURNING *`,
+      [chofer_id, id]
+    );
+
+    res.json({ success: true, data: result.rows[0], mensaje: 'Chofer asignado correctamente' });
+  } catch (error) {
+    console.error('Error asignar chofer:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// =====================================================
+// ENDPOINTS DE COTIZACIONES
+// =====================================================
+
+// GET - Listar cotizaciones
+router.get('/cotizaciones/lista', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const result = await pool.query(
+      `SELECT i.*, c.nombre as cliente_nombre
+       FROM invoices i
+       LEFT JOIN customers c ON i.customer_id = c.id
+       WHERE i.tenant_id = $1 AND i.estado = 'cotizacion'
+       ORDER BY i.creado_en DESC`,
+      [tenant_id]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// POST - Crear cotizacion
+router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { customer_id, items } = req.body;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'Debe agregar al menos un producto' });
+    }
+
+    let subtotal = 0;
+    let itbis = 0;
+    items.forEach(item => {
+      const itemSubtotal = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const itemItbis = itemSubtotal * (parseFloat(item.itbis_rate || 18) / 100);
+      subtotal += itemSubtotal;
+      itbis += itemItbis;
+    });
+    const total = subtotal + itbis;
+
+    const cotizacion = await pool.query(
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, fecha_emision)
+       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, NOW()) RETURNING *`,
+      [tenant_id, customer_id || null, subtotal, itbis, total]
+    );
+
+    const cotizacionId = cotizacion.rows[0].id;
+
+    for (const item of items) {
+      const itemSubtotal = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const itemItbis = itemSubtotal * (parseFloat(item.itbis_rate || 18) / 100);
+ await pool.query(
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [cotizacionId, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, itemItbis, itemSubtotal, itemSubtotal + itemItbis]
+      );
+    }
+
+    res.json({ success: true, data: cotizacion.rows[0] });
+  } catch (error) {
+    console.error('Error crear cotizacion:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// PUT - Convertir cotizacion a factura
+router.put('/cotizacion/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+
+    const cot = await pool.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2 AND estado='cotizacion'`,
+      [id, tenant_id]
+    );
+    if (cot.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Cotizacion no encontrada' });
+    }
+
+    const seq = await pool.query(
+      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`,
+      [tenant_id]
+    );
+    if (seq.rows.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 activa' });
+    }
+
+    const secuencia = seq.rows[0];
+    const numero = String(secuencia.secuencia_actual).padStart(8, '0');
+    const ncf = `B01${numero}`;
+
+    await pool.query(
+      `UPDATE ncf_sequences SET secuencia_actual = secuencia_actual + 1 WHERE id = $1`,
+      [secuencia.id]
+    );
+
+    const numQuery = await pool.query(
+      `SELECT COALESCE(MAX(numero_factura), 0) + 1 as siguiente FROM invoices WHERE tenant_id = $1`,
+      [tenant_id]
+    );
+    const numero_factura = numQuery.rows[0].siguiente;
+
+    const result = await pool.query(
+      `UPDATE invoices SET estado='emitida', ncf=$1, fecha_emision=NOW(), actualizado_en=NOW(), numero_factura=$3
+       WHERE id=$2 RETURNING *`,
+      [ncf, id, numero_factura]
+    );
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error convertir cotizacion:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// DELETE - Eliminar cotizacion
+router.delete('/cotizacion/:id', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+
+    const cot = await pool.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2 AND estado='cotizacion'`,
+      [id, tenant_id]
+    );
+    if (cot.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Cotizacion no encontrada' });
+    }
+
+    await pool.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [id]);
+    await pool.query(`DELETE FROM invoices WHERE id = $1`, [id]);
+
+    res.json({ success: true, mensaje: 'Cotizacion eliminada' });
+  } catch (error) {
+    console.error('Error eliminar cotizacion:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 module.exports = router;
