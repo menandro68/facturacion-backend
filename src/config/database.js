@@ -130,6 +130,14 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla invoices creada');
 
+    // Agregar columnas operador_id, anulado_por, anulado_en a invoices
+    await pool.query(`
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operador_id UUID;
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS anulado_por UUID;
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS anulado_en TIMESTAMP;
+    `);
+    console.log('Columnas operador_id, anulado_por, anulado_en agregadas a invoices');
+
     // 9. Tabla invoice_items
     await pool.query(`
       CREATE TABLE IF NOT EXISTS invoice_items (
@@ -167,8 +175,10 @@ const createTables = async () => {
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'confirmado';
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS vendedor_nombre VARCHAR(150);
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmado_en TIMESTAMP;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS operador_id UUID;
     `);
     console.log('✅ Tabla payments creada');
+    console.log('Columna operador_id agregada a payments');
 
     // 11. Tabla proveedores
     await pool.query(`
@@ -439,7 +449,11 @@ const createTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_devoluciones_estado ON devoluciones(estado);
       CREATE INDEX IF NOT EXISTS idx_devoluciones_creado ON devoluciones(creado_en);
     `);
+    await pool.query(`
+      ALTER TABLE devoluciones ADD COLUMN IF NOT EXISTS operador_id UUID;
+    `);
     console.log('✅ Tabla devoluciones creada');
+    console.log('Columna operador_id agregada a devoluciones');
 
     // Tabla items de devoluciones
     await pool.query(`

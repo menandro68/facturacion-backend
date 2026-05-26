@@ -66,9 +66,9 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
 
     // Registrar pago
     const payment = await client.query(
-      `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas, vendedor_nombre, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente') RETURNING *`,
-      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre]
+      `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas, vendedor_nombre, estado, operador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8) RETURNING *`,
+      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre, req.user.operador_id || null]
     );
 
     // Verificar si el pago cubre el total

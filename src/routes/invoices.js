@@ -159,9 +159,9 @@ router.post('/pedido', verifyToken, tenantGuard, async (req, res) => {
     }
     const total = subtotal + itbis;
     const pedido = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision)
-       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW()) RETURNING *`,
-      [tenant_id, customer_id || null, subtotal, itbis, total, notas || null]
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, operador_id)
+       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW(), $7) RETURNING *`,
+      [tenant_id, customer_id || null, subtotal, itbis, total, notas || null, req.user.operador_id || null]
     );
     const pedido_id = pedido.rows[0].id;
     for (const item of items) {
@@ -341,10 +341,10 @@ router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
     const total = subtotal + itbis;
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
     const nota = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, referencia_id, numero_factura)
-       VALUES ($1, $2, 'NC', $3, 'nota_credito', $4, $5, $6, $7, NOW(), $8, $9) RETURNING *`,
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, referencia_id, numero_factura, operador_id)
+       VALUES ($1, $2, 'NC', $3, 'nota_credito', $4, $5, $6, $7, NOW(), $8, $9, $10) RETURNING *`,
       [tenant_id, facturaOrig.rows[0].customer_id, nc_numero, subtotal, itbis, total,
-       motivo || `Nota de crédito por factura ${facturaOrig.rows[0].ncf}`, factura_id, numero_factura]
+       motivo || `Nota de crédito por factura ${facturaOrig.rows[0].ncf}`, factura_id, numero_factura, req.user.operador_id || null]
     );
     const nota_id = nota.rows[0].id;
     for (const item of items) {
@@ -469,9 +469,9 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     }
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
     const invoice = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura)
-       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13) RETURNING *`,
-      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura]
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id)
+       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14) RETURNING *`,
+      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null]
     );
     const invoice_id = invoice.rows[0].id;
     for (const item of items) {
@@ -580,8 +580,8 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'La factura ya está anulada' });
     }
     const updated = await pool.query(
-      `UPDATE invoices SET estado='anulada', actualizado_en=NOW() WHERE id=$1 RETURNING *`,
-      [id]
+      `UPDATE invoices SET estado='anulada', actualizado_en=NOW(), anulado_por=$2, anulado_en=NOW() WHERE id=$1 RETURNING *`,
+      [id, req.user.operador_id || null]
     );
     res.json({ success: true, data: updated.rows[0] });
   } catch (error) {
@@ -1327,9 +1327,9 @@ router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
     const total = subtotal + itbis;
 
     const cotizacion = await pool.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, fecha_emision)
-       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, NOW()) RETURNING *`,
-      [tenant_id, customer_id || null, subtotal, itbis, total]
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, fecha_emision, operador_id)
+       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, NOW(), $6) RETURNING *`,
+      [tenant_id, customer_id || null, subtotal, itbis, total, req.user.operador_id || null]
     );
 
     const cotizacionId = cotizacion.rows[0].id;
