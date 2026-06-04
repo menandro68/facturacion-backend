@@ -52,10 +52,13 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       });
     }
 
+// Normalizar username a minusculas (el login busca en minusculas)
+    const usernameNormalizado = username.toLowerCase().trim();
+
     // Verificar que el username no exista para este tenant
     const existe = await pool.query(
       `SELECT id FROM operadores WHERE tenant_id = $1 AND username = $2`,
-      [tenant_id, username]
+      [tenant_id, usernameNormalizado]
     );
     if (existe.rows.length > 0) {
       return res.status(400).json({
@@ -71,7 +74,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       `INSERT INTO operadores (tenant_id, nombre, username, password, modulos_permitidos)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, nombre, username, activo, modulos_permitidos, creado_en`,
-      [tenant_id, nombre, username, passwordHash, JSON.stringify(modulos_permitidos)]
+    [tenant_id, nombre, usernameNormalizado, passwordHash, JSON.stringify(modulos_permitidos)]
     );
 
     const operador = result.rows[0];
@@ -107,10 +110,13 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
       });
     }
 
+  // Normalizar username a minusculas (el login busca en minusculas)
+    const usernameNormalizado = username.toLowerCase().trim();
+
     // Verificar que no haya otro operador con el mismo username
     const conflicto = await pool.query(
       `SELECT id FROM operadores WHERE tenant_id = $1 AND username = $2 AND id != $3`,
-      [tenant_id, username, id]
+      [tenant_id, usernameNormalizado, id]
     );
     if (conflicto.rows.length > 0) {
       return res.status(400).json({
@@ -124,7 +130,7 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
        SET nombre = $1, username = $2, modulos_permitidos = $3, actualizado_en = NOW()
        WHERE id = $4 AND tenant_id = $5
        RETURNING id, nombre, username, activo, modulos_permitidos, creado_en, actualizado_en`,
-      [nombre, username, JSON.stringify(modulos_permitidos), id, tenant_id]
+    [nombre, usernameNormalizado, JSON.stringify(modulos_permitidos), id, tenant_id]
     );
 
     if (result.rows.length === 0) {
