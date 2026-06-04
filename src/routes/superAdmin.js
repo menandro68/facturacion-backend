@@ -180,18 +180,42 @@ router.put('/tenants/:id', verifySuperAdmin, async (req, res) => {
 
 // DELETE - Eliminar tenant (con todos sus datos)
 router.delete('/tenants/:id', verifySuperAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    // Borrar items que referencian products (sin cascade) antes del tenant
+    await client.query(
+      `DELETE FROM purchase_order_items WHERE order_id IN (SELECT id FROM purchase_orders WHERE tenant_id = $1)`,
+      [id]
+    );
+    await client.query(
+      `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE tenant_id = $1)`,
+      [id]
+    );
+    await client.query(
+      `DELETE FROM devoluciones_items WHERE devolucion_id IN (SELECT id FROM devoluciones WHERE tenant_id = $1)`,
+      [id]
+    );
+
+    // Borrar tenant: el resto cae en cascada (ON DELETE CASCADE)
+    const result = await client.query(
       `DELETE FROM tenants WHERE id = $1 RETURNING *`,
       [id]
     );
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ success: false, mensaje: 'Tenant no encontrado' });
     }
+
+    await client.query('COMMIT');
     res.json({ success: true, mensaje: 'Empresa eliminada correctamente' });
   } catch (error) {
+    await client.query('ROLLBACK');
     res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
   }
 });
 
