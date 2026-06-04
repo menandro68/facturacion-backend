@@ -8,6 +8,17 @@ const QRCode = require('qrcode');
 const bwipjs = require('bwip-js');
 const { obtenerProximoNumeroFactura } = require('../helpers/numeroFactura');
 
+// Helper: generar QR con la ubicacion del cliente (link a Google Maps)
+async function generarQRUbicacion(direccion) {
+  try {
+    if (!direccion || !direccion.trim()) return null;
+    const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion.trim());
+    return await QRCode.toBuffer(url, { margin: 1, width: 150 });
+  } catch (e) {
+    return null;
+  }
+}
+
 router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -751,7 +762,17 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
         console.error('Error codigo barras:', bcError.message);
       }
     }
-    y += 4;
+y += 4;
+    // QR de ubicacion del cliente
+    const qrUbicacion = await generarQRUbicacion(data.cliente_direccion);
+    if (qrUbicacion) {
+      const qrUbiSize = 80;
+      const qrUbiX = (W - qrUbiSize) / 2;
+      doc.image(qrUbicacion, qrUbiX, y, { width: qrUbiSize, height: qrUbiSize });
+      y += qrUbiSize + 4;
+      centrado('Escanee para ubicacion del cliente', 7);
+      y += 4;
+    }
     lineaGuiones();
     y += 2;
     centrado('GRACIAS POR SU COMPRA', 9, true);
@@ -981,10 +1002,16 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       y += rowH;
     }
 
-    // Linea separadora antes de totales
+// Linea separadora antes de totales
     doc.rect(M, y, col, 1.5).fill(azulOscuro);
     y += 8;
-
+    // QR de ubicacion del cliente (a la izquierda de los totales)
+    const qrUbicacion = await generarQRUbicacion(data.cliente_direccion);
+    if (qrUbicacion) {
+      doc.image(qrUbicacion, M, y, { width: 50 });
+      doc.fillColor(negro).fontSize(5).font('Helvetica')
+         .text('Escanee para ubicacion', M, y + 52, { width: 50, align: 'center' });
+    }
     // TOTALES (solo en la ultima pagina)
     const tw = 220;
     const tx = M + col - tw;
@@ -1175,9 +1202,15 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
       y += rowH;
     }
 
-    doc.rect(M, y, col, 1.5).fill(azulOscuro);
+  doc.rect(M, y, col, 1.5).fill(azulOscuro);
     y += 18;
-
+    // QR de ubicacion del cliente (a la izquierda de los totales)
+    const qrUbicacion = await generarQRUbicacion(data.cliente_direccion);
+    if (qrUbicacion) {
+      doc.image(qrUbicacion, M, y, { width: 65 });
+      doc.fillColor(negro).fontSize(6).font('Helvetica')
+         .text('Escanee para ubicacion', M, y + 67, { width: 65, align: 'center' });
+    }
     // TOTALES
     const tw = 220;
     const tx = M + col - tw;
