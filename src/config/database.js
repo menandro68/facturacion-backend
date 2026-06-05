@@ -473,6 +473,34 @@ const createTables = async () => {
     `);
     console.log('✅ Tabla devoluciones_items creada');
 
+    // Tabla conduces (documento de entrega sin valor fiscal)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conduces (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        numero_conduce INTEGER NOT NULL,
+        customer_id UUID REFERENCES customers(id),
+        chofer_id UUID REFERENCES choferes(id),
+        estado VARCHAR(20) DEFAULT 'emitido',
+        notas TEXT,
+        operador_id UUID,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla conduces creada');
+
+    // Tabla items de conduces
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conduce_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        conduce_id UUID NOT NULL REFERENCES conduces(id) ON DELETE CASCADE,
+        product_id UUID REFERENCES products(id),
+        descripcion VARCHAR(255) NOT NULL,
+        cantidad DECIMAL(12,2) NOT NULL
+      )
+    `);
+    console.log('✅ Tabla conduce_items creada');
+
     // Tabla ncf_secuencias_electronicas (E31, E32, E34 - Factura Electrónica DGII)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS ncf_secuencias_electronicas (
