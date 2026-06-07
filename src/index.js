@@ -20,7 +20,6 @@ const apRoutes = require('./routes/accounts_payable');
 const mantenimientoRoutes = require('./routes/mantenimiento');
 const purchaseOrderRoutes = require('./routes/purchase_orders');
 const devolucionesRoutes = require('./routes/devoluciones');
-const conducesRoutes = require('./routes/conduces');
 const operadoresRoutes = require('./routes/operadores');
 const superAdminRoutes = require('./routes/superAdmin');
 
@@ -69,7 +68,6 @@ app.use('/accounts-payable', apRoutes);
 app.use('/mantenimiento', mantenimientoRoutes);
 app.use('/purchase-orders', purchaseOrderRoutes);
 app.use('/devoluciones', devolucionesRoutes);
-app.use('/conduces', conducesRoutes);
 app.use('/operadores', operadoresRoutes);
 app.use('/super-admin', superAdminRoutes);
 
@@ -117,7 +115,6 @@ app.get('/{*path}', (req, res) => {
       !req.path.startsWith('/accounts') && !req.path.startsWith('/mantenimiento') &&
       !req.path.startsWith('/purchase') && !req.path.startsWith('/tenant') &&
    !req.path.startsWith('/devoluciones') && !req.path.startsWith('/operadores') &&
-      !req.path.startsWith('/conduces') &&
       !req.path.startsWith('/db-test') && !req.path.startsWith('/health')) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.setHeader('Pragma', 'no-cache')

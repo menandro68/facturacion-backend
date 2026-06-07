@@ -238,6 +238,9 @@ router.put('/pedido/:id/editar', verifyToken, tenantGuard, async (req, res) => {
 })
 
 router.put('/pedido/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
+  if (req.user.rol === 'vendedor') {
+    return res.status(403).json({ success: false, mensaje: 'Usted no tiene permiso para convertir pedidos a factura' });
+  }
   const client = await pool.connect();
   try {
     const { tenant_id } = req.user;

@@ -25,16 +25,6 @@ router.post('/zonas', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { nombre, descripcion } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
-
-    // Validar zona duplicada (mismo nombre, mismo tenant, solo activas)
-    const existe = await pool.query(
-      `SELECT id FROM zonas WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
-      [tenant_id, nombre]
-    );
-    if (existe.rows.length > 0) {
-      return res.status(400).json({ success: false, mensaje: 'Ya existe una zona con ese nombre' });
-    }
-
     const result = await pool.query(
       `INSERT INTO zonas (tenant_id, nombre, descripcion) VALUES ($1, $2, $3) RETURNING *`,
       [tenant_id, nombre, descripcion || null]

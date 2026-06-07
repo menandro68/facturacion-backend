@@ -9,7 +9,8 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const result = await pool.query(
-      `SELECT * FROM products WHERE tenant_id = $1 AND estado = 'activo' ORDER BY nombre`,
+    `SELECT p.*, COALESCE((SELECT SUM(i.stock_actual) FROM inventory i WHERE i.product_id = p.id AND i.tenant_id = p.tenant_id), 0) as stock_actual
+       FROM products p WHERE p.tenant_id = $1 AND p.estado = 'activo' ORDER BY p.nombre`,
       [tenant_id]
     );
     res.json({ success: true, data: result.rows });
