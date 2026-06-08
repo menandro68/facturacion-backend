@@ -67,6 +67,18 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       });
     }
 
+    // Verificar que el username no este ocupado por un vendedor activo
+    const existeVendedor = await pool.query(
+      `SELECT id FROM vendedores WHERE tenant_id = $1 AND LOWER(usuario) = $2 AND estado = 'activo'`,
+      [tenant_id, usernameNormalizado]
+    );
+    if (existeVendedor.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        mensaje: 'Ese usuario ya está ocupado por un vendedor'
+      });
+    }
+
     // Hash de contraseña
     const passwordHash = await bcrypt.hash(password, 10);
 

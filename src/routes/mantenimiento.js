@@ -25,6 +25,16 @@ router.post('/zonas', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { nombre, descripcion } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
+
+    // Validar zona duplicada (mismo nombre, mismo tenant, solo activas)
+    const existe = await pool.query(
+      `SELECT id FROM zonas WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
+      [tenant_id, nombre]
+    );
+    if (existe.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: 'Ya existe una zona con ese nombre' });
+    }
+
     const result = await pool.query(
       `INSERT INTO zonas (tenant_id, nombre, descripcion) VALUES ($1, $2, $3) RETURNING *`,
       [tenant_id, nombre, descripcion || null]
@@ -94,6 +104,47 @@ router.post('/vendedores', verifyToken, tenantGuard, async (req, res) => {
       const bcrypt = require('bcryptjs');
       const salt = await bcrypt.genSalt(10);
       password_hash = await bcrypt.hash(password, salt);
+    }
+
+    // Verificar que el usuario no este ocupado por un operador
+    if (usuario) {
+      const existeOperador = await pool.query(
+        `SELECT id FROM operadores WHERE tenant_id = $1 AND LOWER(username) = LOWER($2)`,
+        [tenant_id, usuario]
+      );
+      if (existeOperador.rows.length > 0) {
+        return res.status(400).json({ success: false, mensaje: 'Ese usuario ya está ocupado por un operador' });
+      }
+    }
+
+    // Verificar que el usuario no este ocupado por OTRO vendedor activo
+    if (usuario) {
+      const existeVendedorActivo = await pool.query(
+        `SELECT id FROM vendedores WHERE tenant_id = $1 AND LOWER(usuario) = LOWER($2) AND estado = 'activo'`,
+        [tenant_id, usuario]
+      );
+      if (existeVendedorActivo.rows.length > 0) {
+        return res.status(400).json({ success: false, mensaje: 'Ese usuario ya está ocupado por otro vendedor' });
+      }
+    }
+
+    // Si existe un vendedor INACTIVO con el mismo usuario, reactivarlo en vez de insertar
+    if (usuario) {
+      const existente = await pool.query(
+        `SELECT id FROM vendedores WHERE tenant_id=$1 AND usuario=$2 AND estado='inactivo' LIMIT 1`,
+        [tenant_id, usuario]
+      );
+      if (existente.rows[0]) {
+        const reactivado = await pool.query(
+          `UPDATE vendedores SET nombre=$1, cedula=$2, email=$3, telefono=$4, zona_id=$5, comision_pct=$6,
+             ${password_hash ? 'password_hash=$8,' : ''} estado='activo', actualizado_en=NOW()
+           WHERE id=$7 RETURNING *`,
+          password_hash
+            ? [nombre, cedula || null, email || null, telefono || null, zona_id || null, comision_pct || 0, existente.rows[0].id, password_hash]
+            : [nombre, cedula || null, email || null, telefono || null, zona_id || null, comision_pct || 0, existente.rows[0].id]
+        );
+        return res.status(201).json({ success: true, data: reactivado.rows[0] });
+      }
     }
 
     const result = await pool.query(
