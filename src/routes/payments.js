@@ -71,21 +71,16 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre, req.user.operador_id || null]
     );
 
-    // Verificar si el pago cubre el total
+// Verificar si el pago cubre el total (SOLO pagos confirmados cuentan)
     const pagos = await client.query(
-      `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE invoice_id = $1`,
+      `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE invoice_id = $1 AND estado = 'confirmado'`,
       [invoice_id]
     );
     const total_pagado = parseFloat(pagos.rows[0].total_pagado);
     const total_factura = parseFloat(invoice.rows[0].total);
 
-    // Actualizar estado de factura si está pagada
-    if (total_pagado >= total_factura) {
-      await client.query(
-        `UPDATE invoices SET estado='pagada', actualizado_en=NOW() WHERE id=$1`,
-        [invoice_id]
-      );
-    }
+    // La factura NO se marca pagada aqui: el pago entra pendiente y debe
+    // ser confirmado por la administracion (endpoint /:id/confirmar)
 
     await client.query('COMMIT');
     res.status(201).json({
@@ -114,17 +109,18 @@ router.get('/pendientes', verifyToken, tenantGuard, async (req, res) => {
       FROM payments p
       JOIN invoices i ON p.invoice_id = i.id
       LEFT JOIN customers c ON i.customer_id = c.id
+      
       WHERE p.tenant_id = $1 AND (p.estado = 'pendiente' OR p.estado IS NULL)
     `;
     const params = [tenant_id];
 
-    if (fecha_inicio) {
+if (fecha_inicio) {
       params.push(fecha_inicio);
-      query += ` AND DATE(p.creado_en) >= $${params.length}`;
+      query += ` AND DATE(p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') >= $${params.length}`;
     }
     if (fecha_fin) {
       params.push(fecha_fin);
-      query += ` AND DATE(p.creado_en) <= $${params.length}`;
+      query += ` AND DATE(p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') <= $${params.length}`;
     }
     if (vendedor) {
       params.push(`%${vendedor}%`);
@@ -207,12 +203,34 @@ router.put('/:id/confirmar', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const result = await pool.query(
+const result = await pool.query(
       `UPDATE payments SET estado='confirmado', confirmado_en=NOW()
        WHERE id = $1 AND tenant_id = $2 RETURNING *`,
       [id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Pago no encontrado' });
+
+    // Tras confirmar, verificar si la factura quedo totalmente pagada (solo pagos confirmados)
+    const invoiceId = result.rows[0].invoice_id;
+    const sumConf = await pool.query(
+      `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE invoice_id = $1 AND estado = 'confirmado'`,
+      [invoiceId]
+    );
+    const facturaRow = await pool.query(
+      `SELECT total FROM invoices WHERE id = $1 AND tenant_id = $2`,
+      [invoiceId, tenant_id]
+    );
+    if (facturaRow.rows[0]) {
+      const totalPagado = parseFloat(sumConf.rows[0].total_pagado);
+      const totalFactura = parseFloat(facturaRow.rows[0].total);
+      if (totalPagado >= totalFactura) {
+        await pool.query(
+          `UPDATE invoices SET estado='pagada', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
+          [invoiceId, tenant_id]
+        );
+      }
+    }
+
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
