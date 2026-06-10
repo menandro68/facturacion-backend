@@ -6,7 +6,7 @@ const tenantGuard = require('../middleware/tenantGuard');
 const QRCode = require('qrcode');
 
 // ==========================================
-// Crear tablas si no existen
+// Crear/reparar tablas
 // ==========================================
 (async () => {
   try {
@@ -46,17 +46,24 @@ const QRCode = require('qrcode');
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo'`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW()`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS anulado_en TIMESTAMP`);
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS inventario_rebajado BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS total NUMERIC(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT false`);
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS factura_id UUID`);
 
     // Auto-reparacion: asegurar columnas en tabla conduces_items existente
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS product_id UUID`);
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS descripcion VARCHAR(255)`);
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS cantidad NUMERIC(12,2) DEFAULT 1`);
+    await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(12,2) DEFAULT 0`);
+    await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS itbis_rate NUMERIC(5,2) DEFAULT 0`);
 
     console.log('✅ Tablas conduces verificadas/reparadas');
   } catch (e) {
     console.error('Error creando/reparando tablas conduces:', e.message);
   }
 })();
+
 // ==========================================
 // GET - Listar conduces
 // ==========================================
@@ -130,7 +137,8 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       const cho = await client.query(`SELECT nombre FROM choferes WHERE id = $1 AND tenant_id = $2`, [chofer_id, tenant_id]);
       choferNombre = cho.rows[0]?.nombre || null;
     }
-// Numero correlativo por tenant (entero, basado en numero_conduce existente)
+
+    // Numero correlativo por tenant (entero, basado en numero_conduce existente)
     const maxNum = await client.query(
       `SELECT COALESCE(MAX(numero_conduce), 0) + 1 AS siguiente FROM conduces WHERE tenant_id = $1`,
       [tenant_id]
@@ -145,14 +153,52 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     );
 
     const conduceId = conduce.rows[0].id;
+    let totalConduce = 0;
 
     for (const it of items) {
+      // Tomar precio actual y tasa de ITBIS del producto (si tiene product_id)
+      let precioUnit = 0;
+      let itbisRate = 0;
+      if (it.product_id) {
+        const prod = await client.query(
+          `SELECT precio, itbis_rate FROM products WHERE id = $1 AND tenant_id = $2`,
+          [it.product_id, tenant_id]
+        );
+        if (prod.rows[0]) {
+          precioUnit = parseFloat(prod.rows[0].precio) || 0;
+          itbisRate = parseFloat(prod.rows[0].itbis_rate) || 0;
+        }
+      }
+      const cantidad = parseFloat(it.cantidad) || 0;
+      totalConduce += precioUnit * cantidad;
+
       await client.query(
-        `INSERT INTO conduces_items (conduce_id, product_id, descripcion, cantidad)
-         VALUES ($1, $2, $3, $4)`,
-        [conduceId, it.product_id || null, it.descripcion || '', parseFloat(it.cantidad) || 0]
+        `INSERT INTO conduces_items (conduce_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [conduceId, it.product_id || null, it.descripcion || '', cantidad, precioUnit, itbisRate]
       );
+
+      // Rebajar inventario (mismo patron que la factura)
+      if (it.product_id) {
+        const inv = await client.query(
+          'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
+          [it.product_id, tenant_id]
+        );
+        if (inv.rows.length > 0) {
+          const stockNuevo = parseFloat(inv.rows[0].stock_actual) - cantidad;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
+            [stockNuevo, inv.rows[0].id]);
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
+            [tenant_id, inv.rows[0].id, cantidad, inv.rows[0].stock_actual, stockNuevo, `Conduce ${numeroTexto}`]
+          );
+        }
+      }
     }
+
+    // Guardar total y marcar que ya rebajo inventario (evita doble rebaja al facturar)
+    await client.query(`UPDATE conduces SET total = $1, inventario_rebajado = true WHERE id = $2`, [totalConduce, conduceId]);
 
     await client.query('COMMIT');
     res.status(201).json({ success: true, data: conduce.rows[0] });
@@ -258,29 +304,45 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     // Tabla de articulos - encabezado
     const colDescX = M;
-    const colCantX = W - M - 90;
+    const colCantX = M + 245;
+    const colPrecioX = M + 330;
+    const colSubX = W - M - 95;
     doc.rect(M, y, W - M * 2, 22).fill(azul);
     doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold');
     doc.text('DESCRIPCION', colDescX + 8, y + 6);
-    doc.text('CANTIDAD', colCantX, y + 6, { width: 82, align: 'right' });
+    doc.text('CANT.', colCantX, y + 6, { width: 70, align: 'right' });
+    doc.text('PRECIO', colPrecioX, y + 6, { width: 80, align: 'right' });
+    doc.text('SUBTOTAL', colSubX, y + 6, { width: 87, align: 'right' });
     y += 22;
 
     // Filas
     doc.font('Helvetica').fontSize(10);
+    let totalDoc = 0;
     items.forEach((it, i) => {
       const rowH = 20;
       if (i % 2 === 1) {
         doc.rect(M, y, W - M * 2, rowH).fill('#f1f5f9');
       }
+      const cant = parseFloat(it.cantidad) || 0;
+      const precio = parseFloat(it.precio_unitario) || 0;
+      const sub = cant * precio;
+      totalDoc += sub;
       doc.fillColor('#1e293b');
       doc.text(it.descripcion || '', colDescX + 8, y + 5, { width: colCantX - colDescX - 16 });
-      doc.text(parseFloat(it.cantidad).toFixed(2), colCantX, y + 5, { width: 82, align: 'right' });
+      doc.text(cant.toFixed(2), colCantX, y + 5, { width: 70, align: 'right' });
+      doc.text('RD$' + precio.toLocaleString('es-DO', { minimumFractionDigits: 2 }), colPrecioX, y + 5, { width: 80, align: 'right' });
+      doc.text('RD$' + sub.toLocaleString('es-DO', { minimumFractionDigits: 2 }), colSubX, y + 5, { width: 87, align: 'right' });
       y += rowH;
     });
 
     // Linea cierre tabla
     doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#cbd5e1').lineWidth(1).stroke();
-    y += 16;
+    y += 12;
+
+    // Total (sin ITBIS - documento sin valor fiscal)
+    doc.fontSize(12).fillColor('#0f172a').font('Helvetica-Bold')
+      .text('TOTAL: RD$' + totalDoc.toLocaleString('es-DO', { minimumFractionDigits: 2 }), M, y, { width: W - M * 2, align: 'right' });
+    y += 24;
 
     // Notas
     if (d.notas) {
