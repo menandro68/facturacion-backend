@@ -128,6 +128,17 @@ router.post('/vendedores', verifyToken, tenantGuard, async (req, res) => {
       }
     }
 
+ // Verificar que la zona no este ya asignada a otro vendedor activo
+    if (zona_id) {
+      const zonaOcupada = await pool.query(
+        `SELECT nombre FROM vendedores WHERE tenant_id = $1 AND zona_id = $2 AND estado = 'activo' LIMIT 1`,
+        [tenant_id, zona_id]
+      );
+      if (zonaOcupada.rows[0]) {
+        return res.status(400).json({ success: false, mensaje: `Esa zona ya está asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
+      }
+    }
+
     // Si existe un vendedor INACTIVO con el mismo usuario, reactivarlo en vez de insertar
     if (usuario) {
       const existente = await pool.query(
@@ -162,7 +173,18 @@ router.put('/vendedores/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, cedula, email, telefono, zona_id, comision_pct, usuario, password } = req.body;
+  const { nombre, cedula, email, telefono, zona_id, comision_pct, usuario, password } = req.body;
+
+    // Verificar que la zona no este ya asignada a OTRO vendedor activo
+    if (zona_id) {
+      const zonaOcupada = await pool.query(
+        `SELECT nombre FROM vendedores WHERE tenant_id = $1 AND zona_id = $2 AND estado = 'activo' AND id != $3 LIMIT 1`,
+        [tenant_id, zona_id, id]
+      );
+      if (zonaOcupada.rows[0]) {
+        return res.status(400).json({ success: false, mensaje: `Esa zona ya está asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
+      }
+    }
 
     let password_hash_update = '';
     let params = [nombre, cedula, email, telefono, zona_id || null, comision_pct, usuario || null];
