@@ -229,6 +229,126 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
 });
 
 // ==========================================
+// PUT - Convertir conduce en factura (con ITBIS y NCF)
+// ==========================================
+router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+
+    await client.query('BEGIN');
+
+    // 1. Buscar el conduce
+    const conduceQ = await client.query(
+      `SELECT * FROM conduces WHERE id = $1 AND tenant_id = $2`,
+      [id, tenant_id]
+    );
+    if (!conduceQ.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' });
+    }
+    const conduce = conduceQ.rows[0];
+
+    // 2. Validaciones
+    if (conduce.estado === 'anulado') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'No se puede facturar un conduce anulado' });
+    }
+    if (conduce.facturado) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'Este conduce ya fue convertido en factura' });
+    }
+
+    // 3. Items del conduce
+    const itemsQ = await client.query(`SELECT * FROM conduces_items WHERE conduce_id = $1`, [id]);
+    const items = itemsQ.rows;
+    if (items.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'El conduce no tiene articulos' });
+    }
+
+    // 4. Generar NCF B01 (mismo patron que cotizacion->factura)
+    const seq = await client.query(
+      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`,
+      [tenant_id]
+    );
+    if (seq.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 activa' });
+    }
+    const secuencia = seq.rows[0];
+    const numeroNcf = String(secuencia.secuencia_actual).padStart(8, '0');
+    const ncf = `B01${numeroNcf}`;
+    await client.query(
+      `UPDATE ncf_sequences SET secuencia_actual = secuencia_actual + 1 WHERE id = $1`,
+      [secuencia.id]
+    );
+
+    // 5. Numero de factura correlativo
+    const numQuery = await client.query(
+      `SELECT COALESCE(MAX(numero_factura), 0) + 1 as siguiente FROM invoices WHERE tenant_id = $1`,
+      [tenant_id]
+    );
+    const numero_factura = numQuery.rows[0].siguiente;
+
+    // 6. Calcular totales (AHORA SI con ITBIS)
+    let subtotal = 0;
+    let itbis = 0;
+    for (const it of items) {
+      const cant = parseFloat(it.cantidad) || 0;
+      const precio = parseFloat(it.precio_unitario) || 0;
+      const rate = parseFloat(it.itbis_rate) || 0;
+      const sub = cant * precio;
+      subtotal += sub;
+      itbis += sub * (rate / 100);
+    }
+    const total = subtotal + itbis;
+
+    // 7. Crear la factura (estado emitida)
+    const invoice = await client.query(
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, numero_factura, chofer_id, operador_id)
+       VALUES ($1, $2, 'B01', $3, 'emitida', $4, $5, $6, $7, NOW(), $8, $9, $10) RETURNING *`,
+      [tenant_id, conduce.customer_id || null, ncf, subtotal, itbis, total,
+       `Generada desde conduce ${conduce.numero || ''}`, numero_factura, conduce.chofer_id || null, req.user.operador_id || null]
+    );
+    const invoice_id = invoice.rows[0].id;
+
+    // 8. Crear los items de la factura
+    for (const it of items) {
+      const cant = parseFloat(it.cantidad) || 0;
+      const precio = parseFloat(it.precio_unitario) || 0;
+      const rate = parseFloat(it.itbis_rate) || 0;
+      const item_subtotal = cant * precio;
+      const item_itbis = item_subtotal * (rate / 100);
+      const item_total = item_subtotal + item_itbis;
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [invoice_id, it.product_id || null, it.descripcion || '', cant, precio, rate, item_itbis, item_subtotal, item_total]
+      );
+    }
+
+    // 9. NO rebajar inventario: el conduce ya lo hizo (inventario_rebajado = true)
+    //    Por eso se omite el bloque de rebaja que normalmente tiene la factura.
+
+    // 10. Marcar el conduce como facturado
+    await client.query(
+      `UPDATE conduces SET facturado = true, factura_id = $1 WHERE id = $2`,
+      [invoice_id, id]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, data: invoice.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
 // GET - PDF del conduce (token por query, lo valida verifyToken)
 // ==========================================
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
