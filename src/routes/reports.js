@@ -93,14 +93,22 @@ router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
 
     // Resumen del día
-    const hoy = await pool.query(
+const hoy = await pool.query(
       `SELECT 
         COUNT(*) as facturas_hoy,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as ventas_hoy,
-        COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as cobrado_hoy
+        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as ventas_hoy
        FROM invoices
        WHERE tenant_id = $1
-       AND DATE(creado_en) = CURRENT_DATE`,
+       AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
+      [tenant_id]
+    );
+    // Cobrado hoy desde payments (pagos confirmados de hoy, hora RD)
+    const cobradoHoy = await pool.query(
+      `SELECT COALESCE(SUM(monto), 0) as cobrado_hoy
+       FROM payments
+       WHERE tenant_id = $1
+       AND estado = 'confirmado'
+       AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
       [tenant_id]
     );
 
@@ -128,10 +136,10 @@ router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
       [tenant_id]
     );
 
-    res.json({
+res.json({
       success: true,
       data: {
-        hoy: hoy.rows[0],
+        hoy: { ...hoy.rows[0], cobrado_hoy: cobradoHoy.rows[0].cobrado_hoy },
         mes: mes.rows[0],
         ultimas_facturas: ultimas.rows
       }
