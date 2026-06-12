@@ -1425,7 +1425,7 @@ router.put('/cotizacion/:id/convertir', verifyToken, tenantGuard, async (req, re
     const numero_factura = numQuery.rows[0].siguiente;
 
     const result = await pool.query(
-      `UPDATE invoices SET estado='emitida', ncf=$1, fecha_emision=NOW(), actualizado_en=NOW(), numero_factura=$3
+     `UPDATE invoices SET estado='emitida', ncf=$1, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3
        WHERE id=$2 RETURNING *`,
       [ncf, id, numero_factura]
     );
