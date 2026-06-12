@@ -286,7 +286,7 @@ router.put('/pedido/:id/convertir', verifyToken, tenantGuard, async (req, res) =
     }
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
     const updated = await client.query(
-      `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo='B01', fecha_emision=NOW(), actualizado_en=NOW(), numero_factura=$3
+    `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo='B01', fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3
        WHERE id=$2 RETURNING *`,
       [ncf, id, numero_factura]
     );
