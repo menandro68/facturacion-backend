@@ -10,7 +10,6 @@ const QRCode = require('qrcode');
 // ==========================================
 (async () => {
   try {
-    // Crear tablas si no existen (instalacion limpia)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS conduces (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,7 +35,7 @@ const QRCode = require('qrcode');
       )
     `);
 
-    // Auto-reparacion: asegurar columnas en tabla conduces existente (idempotente)
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS numero_conduce INTEGER`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS numero VARCHAR(20)`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS customer_id UUID`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(255)`);
@@ -51,7 +50,6 @@ const QRCode = require('qrcode');
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS facturado BOOLEAN DEFAULT false`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS factura_id UUID`);
 
-    // Auto-reparacion: asegurar columnas en tabla conduces_items existente
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS product_id UUID`);
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS descripcion VARCHAR(255)`);
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS cantidad NUMERIC(12,2) DEFAULT 1`);
@@ -128,7 +126,6 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Datos de cliente y chofer (snapshot del nombre)
     const cli = await client.query(`SELECT nombre FROM customers WHERE id = $1 AND tenant_id = $2`, [customer_id, tenant_id]);
     const clienteNombre = cli.rows[0]?.nombre || null;
 
@@ -138,7 +135,6 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       choferNombre = cho.rows[0]?.nombre || null;
     }
 
-    // Numero correlativo por tenant (entero, basado en numero_conduce existente)
     const maxNum = await client.query(
       `SELECT COALESCE(MAX(numero_conduce), 0) + 1 AS siguiente FROM conduces WHERE tenant_id = $1`,
       [tenant_id]
@@ -156,7 +152,6 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     let totalConduce = 0;
 
     for (const it of items) {
-      // Tomar precio actual y tasa de ITBIS del producto (si tiene product_id)
       let precioUnit = 0;
       let itbisRate = 0;
       if (it.product_id) {
@@ -178,7 +173,6 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
         [conduceId, it.product_id || null, it.descripcion || '', cantidad, precioUnit, itbisRate]
       );
 
-      // Rebajar inventario (mismo patron que la factura)
       if (it.product_id) {
         const inv = await client.query(
           'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
@@ -197,7 +191,6 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       }
     }
 
-    // Guardar total y marcar que ya rebajo inventario (evita doble rebaja al facturar)
     await client.query(`UPDATE conduces SET total = $1, inventario_rebajado = true WHERE id = $2`, [totalConduce, conduceId]);
 
     await client.query('COMMIT');
@@ -230,6 +223,7 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
 
 // ==========================================
 // PUT - Convertir conduce en factura (con ITBIS y NCF)
+// NCF ATOMICO: usa ncf_secuencias_electronicas con FOR UPDATE (imposible duplicar)
 // ==========================================
 router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
@@ -268,20 +262,29 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'El conduce no tiene articulos' });
     }
 
-    // 4. Generar NCF B01 (mismo patron que cotizacion->factura)
-    const seq = await client.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`,
-      [tenant_id]
+    // 4. Generar NCF B01 ATOMICO desde ncf_secuencias_electronicas (con lock FOR UPDATE)
+    const tipoNcf = 'B01';
+    const seqQ = await client.query(
+      `SELECT id, prefijo, secuencia_desde, secuencia_hasta, secuencia_actual
+       FROM ncf_secuencias_electronicas
+       WHERE tenant_id = $1 AND tipo_ncf = $2 AND activo = true
+         AND secuencia_actual <= secuencia_hasta
+       ORDER BY creado_en ASC
+       LIMIT 1
+       FOR UPDATE`,
+      [tenant_id, tipoNcf]
     );
-    if (seq.rows.length === 0) {
+    if (seqQ.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 activa' });
+      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 disponible. Cree o revise la secuencia en Mantenimiento > Secuencias NCF' });
     }
-    const secuencia = seq.rows[0];
-    const numeroNcf = String(secuencia.secuencia_actual).padStart(8, '0');
-    const ncf = `B01${numeroNcf}`;
+    const secuencia = seqQ.rows[0];
+    const numeroActual = parseInt(secuencia.secuencia_actual);
+    const ncf = `${secuencia.prefijo}${String(numeroActual).padStart(8, '0')}`;
     await client.query(
-      `UPDATE ncf_sequences SET secuencia_actual = secuencia_actual + 1 WHERE id = $1`,
+      `UPDATE ncf_secuencias_electronicas
+       SET secuencia_actual = secuencia_actual + 1, actualizado_en = NOW()
+       WHERE id = $1`,
       [secuencia.id]
     );
 
@@ -292,7 +295,7 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
     );
     const numero_factura = numQuery.rows[0].siguiente;
 
-    // 6. Calcular totales (AHORA SI con ITBIS)
+    // 6. Calcular totales (con ITBIS)
     let subtotal = 0;
     let itbis = 0;
     for (const it of items) {
@@ -330,7 +333,6 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
     }
 
     // 9. NO rebajar inventario: el conduce ya lo hizo (inventario_rebajado = true)
-    //    Por eso se omite el bloque de rebaja que normalmente tiene la factura.
 
     // 10. Marcar el conduce como facturado
     await client.query(
@@ -349,7 +351,7 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
 });
 
 // ==========================================
-// GET - PDF del conduce (token por query, lo valida verifyToken)
+// GET - PDF del conduce
 // ==========================================
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
@@ -384,7 +386,6 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     const M = 50;
     const azul = '#1e40af';
 
-    // Encabezado empresa
     doc.fontSize(18).fillColor(azul).font('Helvetica-Bold')
       .text(d.empresa_nombre || 'Sistema de Facturacion', M, M, { width: W - M * 2, align: 'left' });
     let y = doc.y + 2;
@@ -393,7 +394,6 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     if (d.empresa_tel) { doc.text(`Tel: ${d.empresa_tel}`, M, y); y = doc.y; }
     if (d.empresa_dir) { doc.text(`${d.empresa_dir}`, M, y); y = doc.y; }
 
-    // Titulo documento
     doc.fontSize(15).fillColor('#0f172a').font('Helvetica-Bold')
       .text('CONDUCE / NOTA DE ENTREGA', M, M, { width: W - M * 2, align: 'right' });
     doc.fontSize(11).fillColor(azul).font('Helvetica-Bold')
@@ -405,12 +405,10 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
         .text('** ANULADO **', M, doc.y, { width: W - M * 2, align: 'right' });
     }
 
-    // Linea separadora
     y = Math.max(y, doc.y) + 12;
     doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#cbd5e1').lineWidth(1).stroke();
     y += 14;
 
-    // Datos del cliente
     doc.fontSize(10).fillColor('#0f172a').font('Helvetica-Bold').text('CLIENTE', M, y);
     y = doc.y + 2;
     doc.fontSize(10).fillColor('#334155').font('Helvetica');
@@ -422,7 +420,6 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
 
     y += 14;
 
-    // Tabla de articulos - encabezado
     const colDescX = M;
     const colCantX = M + 245;
     const colPrecioX = M + 330;
@@ -435,7 +432,6 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.text('SUBTOTAL', colSubX, y + 6, { width: 87, align: 'right' });
     y += 22;
 
-    // Filas
     doc.font('Helvetica').fontSize(10);
     let totalDoc = 0;
     items.forEach((it, i) => {
@@ -455,16 +451,13 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       y += rowH;
     });
 
-    // Linea cierre tabla
     doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#cbd5e1').lineWidth(1).stroke();
     y += 12;
 
-    // Total (sin ITBIS - documento sin valor fiscal)
     doc.fontSize(12).fillColor('#0f172a').font('Helvetica-Bold')
       .text('TOTAL: RD$' + totalDoc.toLocaleString('es-DO', { minimumFractionDigits: 2 }), M, y, { width: W - M * 2, align: 'right' });
     y += 24;
 
-    // Notas
     if (d.notas) {
       doc.fontSize(10).fillColor('#0f172a').font('Helvetica-Bold').text('NOTAS:', M, y);
       y = doc.y;
@@ -472,14 +465,12 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       y = doc.y + 10;
     }
 
-    // QR con datos del conduce
     try {
       const qrData = `CONDUCE:${d.numero}|CLIENTE:${d.cliente_nombre || ''}|FECHA:${new Date(d.creado_en).toLocaleDateString('es-DO')}`;
       const qrPng = await QRCode.toBuffer(qrData, { width: 110, margin: 1 });
       doc.image(qrPng, M, y + 10, { width: 90 });
     } catch (e) { /* si falla el QR, continuar sin el */ }
 
-    // Firma
     const firmaY = y + 70;
     doc.moveTo(W - M - 200, firmaY).lineTo(W - M, firmaY).strokeColor('#94a3b8').lineWidth(1).stroke();
     doc.fontSize(9).fillColor('#64748b').font('Helvetica')

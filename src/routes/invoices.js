@@ -253,19 +253,23 @@ router.put('/pedido/:id/convertir', verifyToken, tenantGuard, async (req, res) =
     if (!pedido.rows[0]) {
       return res.status(404).json({ success: false, mensaje: 'Pedido no encontrado' });
     }
-    let seq = await client.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`, [tenant_id]
+const seqQ = await client.query(
+      `SELECT id, prefijo, secuencia_desde, secuencia_hasta, secuencia_actual
+       FROM ncf_secuencias_electronicas
+       WHERE tenant_id = $1 AND tipo_ncf = 'B01' AND activo = true
+         AND secuencia_actual <= secuencia_hasta
+       ORDER BY creado_en ASC
+       LIMIT 1
+       FOR UPDATE`,
+      [tenant_id]
     );
-    if (seq.rows.length === 0) {
-      await client.query(
-        `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max) VALUES ($1,'B01','B01',0,9999999)`,
-        [tenant_id]
-      );
-      seq = await client.query(`SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01'`, [tenant_id]);
+    if (seqQ.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 disponible. Revise Mantenimiento > Secuencias NCF' });
     }
-    const nueva_sec = seq.rows[0].secuencia_actual + 1;
-    await client.query(`UPDATE ncf_sequences SET secuencia_actual=$1 WHERE id=$2`, [nueva_sec, seq.rows[0].id]);
-    const ncf = `B01${String(nueva_sec).padStart(8,'0')}`;
+    const secuencia = seqQ.rows[0];
+    const ncf = `${secuencia.prefijo}${String(parseInt(secuencia.secuencia_actual)).padStart(8, '0')}`;
+    await client.query(`UPDATE ncf_secuencias_electronicas SET secuencia_actual = secuencia_actual + 1, actualizado_en = NOW() WHERE id = $1`, [secuencia.id]);
     const items = await client.query(`SELECT * FROM invoice_items WHERE invoice_id=$1`, [id]);
     for (const item of items.rows) {
       if (!item.product_id) continue;
@@ -1401,22 +1405,29 @@ router.put('/cotizacion/:id/convertir', verifyToken, tenantGuard, async (req, re
       return res.status(404).json({ success: false, mensaje: 'Cotizacion no encontrada' });
     }
 
-    const seq = await pool.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='B01' AND estado='activo'`,
+ const seqQ = await pool.query(
+      `SELECT id, prefijo, secuencia_desde, secuencia_hasta, secuencia_actual
+       FROM ncf_secuencias_electronicas
+       WHERE tenant_id = $1 AND tipo_ncf = 'B01' AND activo = true
+         AND secuencia_actual <= secuencia_hasta
+       ORDER BY creado_en ASC
+       LIMIT 1`,
       [tenant_id]
     );
-    if (seq.rows.length === 0) {
-      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 activa' });
+    if (seqQ.rows.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 disponible. Revise Mantenimiento > Secuencias NCF' });
     }
+    const secuencia = seqQ.rows[0];
+    const ncf = `${secuencia.prefijo}${String(parseInt(secuencia.secuencia_actual)).padStart(8, '0')}`;
 
-    const secuencia = seq.rows[0];
-    const numero = String(secuencia.secuencia_actual).padStart(8, '0');
-    const ncf = `B01${numero}`;
-
-    await pool.query(
-      `UPDATE ncf_sequences SET secuencia_actual = secuencia_actual + 1 WHERE id = $1`,
+    const updSeq = await pool.query(
+      `UPDATE ncf_secuencias_electronicas SET secuencia_actual = secuencia_actual + 1, actualizado_en = NOW()
+       WHERE id = $1 AND secuencia_actual <= secuencia_hasta RETURNING secuencia_actual`,
       [secuencia.id]
     );
+    if (updSeq.rows.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'La secuencia NCF B01 se agoto' });
+    }
 
     const numQuery = await pool.query(
       `SELECT COALESCE(MAX(numero_factura), 0) + 1 as siguiente FROM invoices WHERE tenant_id = $1`,
