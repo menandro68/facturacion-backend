@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
 const QRCode = require('qrcode');
+const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
 
 // ==========================================
 // Crear/reparar tablas
@@ -262,8 +263,19 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'El conduce no tiene articulos' });
     }
 
-    // 4. Generar NCF B01 ATOMICO desde ncf_secuencias_electronicas (con lock FOR UPDATE)
-    const tipoNcf = 'B01';
+  // 4. Determinar tipo de NCF segun el tipo del cliente
+    let tipoNcf = 'B02';
+    if (conduce.customer_id) {
+      const cliQ = await client.query(
+        `SELECT tipo FROM customers WHERE id = $1 AND tenant_id = $2`,
+        [conduce.customer_id, tenant_id]
+      );
+      if (cliQ.rows[0]) {
+        tipoNcf = tipoNcfDesdeCliente(cliQ.rows[0].tipo);
+      }
+    }
+
+    // Generar NCF ATOMICO desde ncf_secuencias_electronicas (con lock FOR UPDATE)
     const seqQ = await client.query(
       `SELECT id, prefijo, secuencia_desde, secuencia_hasta, secuencia_actual
        FROM ncf_secuencias_electronicas
@@ -276,7 +288,7 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
     );
     if (seqQ.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, mensaje: 'No hay secuencia NCF B01 disponible. Cree o revise la secuencia en Mantenimiento > Secuencias NCF' });
+      return res.status(400).json({ success: false, mensaje: `No hay secuencia NCF ${tipoNcf} disponible para este cliente. Cree la secuencia en Mantenimiento > Secuencias NCF` });
     }
     const secuencia = seqQ.rows[0];
     const numeroActual = parseInt(secuencia.secuencia_actual);
@@ -309,11 +321,11 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
     const total = subtotal + itbis;
 
     // 7. Crear la factura (estado emitida)
-    const invoice = await client.query(
+const invoice = await client.query(
       `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, numero_factura, chofer_id, operador_id)
-       VALUES ($1, $2, 'B01', $3, 'emitida', $4, $5, $6, $7, NOW(), $8, $9, $10) RETURNING *`,
+       VALUES ($1, $2, $11, $3, 'emitida', $4, $5, $6, $7, NOW(), $8, $9, $10) RETURNING *`,
       [tenant_id, conduce.customer_id || null, ncf, subtotal, itbis, total,
-       `Generada desde conduce ${conduce.numero || ''}`, numero_factura, conduce.chofer_id || null, req.user.operador_id || null]
+       `Generada desde conduce ${conduce.numero || ''}`, numero_factura, conduce.chofer_id || null, req.user.operador_id || null, tipoNcf]
     );
     const invoice_id = invoice.rows[0].id;
 
