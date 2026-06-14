@@ -43,6 +43,12 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(50)`);
+    if (vendedor_id && zona_id) {
+      const vend = await pool.query(`SELECT zona_id, nombre FROM vendedores WHERE id = $1 AND tenant_id = $2`, [vendedor_id, tenant_id]);
+      if (vend.rows[0] && vend.rows[0].zona_id !== zona_id) {
+        return res.status(400).json({ success: false, mensaje: `El vendedor ${vend.rows[0].nombre} no tiene asignada esta zona. Seleccione un vendedor que cubra la zona del cliente.` });
+      }
+    }
     const result = await pool.query(
       `INSERT INTO customers (tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
@@ -64,6 +70,12 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(50)`);
+    if (vendedor_id && zona_id) {
+      const vend = await pool.query(`SELECT zona_id, nombre FROM vendedores WHERE id = $1 AND tenant_id = $2`, [vendedor_id, tenant_id]);
+      if (vend.rows[0] && vend.rows[0].zona_id !== zona_id) {
+        return res.status(400).json({ success: false, mensaje: `El vendedor ${vend.rows[0].nombre} no tiene asignada esta zona. Seleccione un vendedor que cubra la zona del cliente.` });
+      }
+    }
     const result = await pool.query(
       `UPDATE customers SET nombre=$1, rnc_cedula=$2, email=$3, telefono=$4, direccion=$5, tipo=$6,
        vendedor_id=$7, zona_id=$8, condiciones=$9, actualizado_en=NOW()

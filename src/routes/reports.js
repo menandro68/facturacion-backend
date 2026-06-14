@@ -95,8 +95,8 @@ router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
     // Resumen del día
 const hoy = await pool.query(
       `SELECT 
-        COUNT(*) as facturas_hoy,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as ventas_hoy
+        COUNT(*) FILTER (WHERE estado != 'nota_credito') as facturas_hoy,
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito') THEN total END), 0) as ventas_hoy
        FROM invoices
        WHERE tenant_id = $1
        AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
@@ -115,10 +115,10 @@ const hoy = await pool.query(
     // Resumen del mes
     const mes = await pool.query(
       `SELECT 
-        COUNT(*) as facturas_mes,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as ventas_mes,
+        COUNT(*) FILTER (WHERE estado != 'nota_credito') as facturas_mes,
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito') THEN total END), 0) as ventas_mes,
         COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as cobrado_mes,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as pendiente_mes
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito') THEN total END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as pendiente_mes
        FROM invoices
        WHERE tenant_id = $1
        AND DATE_TRUNC('month', creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
@@ -131,6 +131,7 @@ const hoy = await pool.query(
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        WHERE i.tenant_id = $1
+       AND i.estado != 'nota_credito'
        ORDER BY i.creado_en DESC
        LIMIT 5`,
       [tenant_id]
