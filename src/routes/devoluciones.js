@@ -201,22 +201,28 @@ router.put('/:id/procesar', async (req, res) => {
     const d = dev.rows[0]
     const items = await client.query('SELECT * FROM devoluciones_items WHERE devolucion_id = $1', [id])
 
-    // Generar NCF tipo B04 (Nota de Credito)
+// Generar NCF usando la secuencia NC (misma que las notas de credito directas)
     let ncfNC = null
-    const seq = await client.query(
-      `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = 'B04' AND estado = 'activo' LIMIT 1`,
+    let seq = await client.query(
+      `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = 'NC' AND estado = 'activo' LIMIT 1`,
       [tenant_id]
     )
-    if (seq.rows[0]) {
-      const nuevaSec = parseInt(seq.rows[0].secuencia_actual) + 1
-      ncfNC = `${seq.rows[0].prefijo}${String(nuevaSec).padStart(8, '0')}`
+    if (seq.rows.length === 0) {
       await client.query(
-        `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
-        [nuevaSec, seq.rows[0].id]
+        `INSERT INTO ncf_sequences (tenant_id, tipo, prefijo, secuencia_actual, secuencia_max) VALUES ($1,'NC','NC',0,9999999)`,
+        [tenant_id]
       )
-    } else {
-      ncfNC = `NC${String(Date.now()).slice(-8)}`
+      seq = await client.query(
+        `SELECT * FROM ncf_sequences WHERE tenant_id = $1 AND tipo = 'NC' AND estado = 'activo' LIMIT 1`,
+        [tenant_id]
+      )
     }
+    const nuevaSec = parseInt(seq.rows[0].secuencia_actual) + 1
+    ncfNC = `${seq.rows[0].prefijo}${String(nuevaSec).padStart(8, '0')}`
+    await client.query(
+      `UPDATE ncf_sequences SET secuencia_actual = $1 WHERE id = $2`,
+      [nuevaSec, seq.rows[0].id]
+    )
 
     // Crear NC (registro en invoices con tipo nota_credito)
     const nc = await client.query(`
