@@ -1290,6 +1290,32 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
 });
 
 // =====================================================
+// ENDPOINT LISTAR FACTURAS POR CHOFER + RANGO DE FECHA
+router.get('/chofer/:chofer_id/entregas', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { chofer_id } = req.params;
+    const { fecha_inicio, fecha_fin } = req.query;
+    const result = await pool.query(
+      `SELECT i.*, c.nombre as cliente_nombre, ch.nombre as chofer_nombre
+       FROM invoices i
+       LEFT JOIN customers c ON i.customer_id = c.id
+       LEFT JOIN choferes ch ON i.chofer_id = ch.id
+       WHERE i.tenant_id = $1
+         AND i.chofer_id = $2
+         AND i.estado != 'anulada'
+         AND ($3::date IS NULL OR i.fecha_emision::date >= $3::date)
+         AND ($4::date IS NULL OR i.fecha_emision::date <= $4::date)
+       ORDER BY i.fecha_emision DESC`,
+      [tenant_id, chofer_id, fecha_inicio || null, fecha_fin || null]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Error listar entregas por chofer:', error);
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // ENDPOINT ASIGNAR CHOFER A FACTURA (Entrega Chofer)
 // =====================================================
 router.put('/:id/asignar-chofer', verifyToken, tenantGuard, async (req, res) => {

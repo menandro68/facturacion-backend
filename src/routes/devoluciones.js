@@ -220,9 +220,9 @@ router.put('/:id/procesar', async (req, res) => {
 
     // Crear NC (registro en invoices con tipo nota_credito)
     const nc = await client.query(`
-      INSERT INTO invoices (tenant_id, customer_id, ncf, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision)
-      VALUES ($1, $2, $3, 'B04', 'nota_credito', $4, $5, $6, $7, NOW()) RETURNING *
-    `, [tenant_id, d.customer_id, ncfNC, d.subtotal, d.itbis, d.total, `Nota de credito generada desde devolucion ${d.numero}. Factura original NCF: ${d.factura_ncf}. Motivo: ${d.motivo}`])
+INSERT INTO invoices (tenant_id, customer_id, ncf, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, referencia_id)
+      VALUES ($1, $2, $3, 'B04', 'nota_credito', $4, $5, $6, $7, NOW(), $8) RETURNING *
+    `, [tenant_id, d.customer_id, ncfNC, d.subtotal, d.itbis, d.total, `Nota de credito generada desde devolucion ${d.numero}. Factura original NCF: ${d.factura_ncf}. Motivo: ${d.motivo}`, d.factura_id])
 
     // Crear items de la NC
     for (const item of items.rows) {
