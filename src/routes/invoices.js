@@ -94,19 +94,28 @@ router.get('/reporte/resumen', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { fecha_inicio, fecha_fin } = req.query;
-    const result = await pool.query(`
+const result = await pool.query(`
       SELECT 
         COALESCE(SUM(i.subtotal), 0) as total_subtotal,
         COALESCE(SUM(i.itbis), 0) as total_itbis,
         COALESCE(SUM(i.total), 0) as total_ventas,
-        COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0)), 0) as total_costo
+COALESCE((
+          SELECT SUM(ii.cantidad * COALESCE(p.costo, 0))
+          FROM invoice_items ii
+          LEFT JOIN products p ON p.id = ii.product_id
+          WHERE ii.invoice_id IN (
+            SELECT id FROM invoices
+            WHERE tenant_id = $1
+              AND estado IN ('emitida', 'pagada')
+              AND ($2::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+              AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
+          )
+        ), 0) as total_costo
       FROM invoices i
-      LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
-      LEFT JOIN products p ON p.id = ii.product_id
       WHERE i.tenant_id = $1
-        AND i.estado != 'anulada'
-        AND ($2::date IS NULL OR i.creado_en::date >= $2::date)
-        AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
+        AND i.estado IN ('emitida', 'pagada')
+        AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+        AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
     `, [tenant_id, fecha_inicio || null, fecha_fin || null]);
     const row = result.rows[0];
     const beneficio = parseFloat(row.total_subtotal) - parseFloat(row.total_costo);
