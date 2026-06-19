@@ -74,4 +74,108 @@ router.get('/mis-empresas', async (req, res) => {
   }
 });
 
+// PUT /tenant/sub-empresa/:id - Editar datos de una sub-empresa propia
+router.put('/sub-empresa/:id', async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ success: false, mensaje: 'Solo el admin puede editar empresas' });
+    }
+const { id } = req.params;
+    const { nombre, rnc, email, telefono, direccion, admin_username, admin_password, admin_nombre } = req.body;
+    if (!nombre || !email) {
+      return res.status(400).json({ success: false, mensaje: 'Nombre y email son obligatorios' });
+    }
+    // Validar que la empresa sea hija del usuario actual
+    const check = await pool.query(
+      `SELECT id FROM tenants WHERE id = $1 AND parent_tenant_id = $2`,
+      [id, req.user.tenant_id]
+    );
+    if (check.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Empresa no encontrada o no tiene permiso' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Actualizar datos de la empresa
+      const result = await client.query(
+        `UPDATE tenants SET nombre = $1, rnc = $2, email = $3, telefono = $4, direccion = $5
+         WHERE id = $6 RETURNING *`,
+        [nombre, rnc || null, email, telefono || null, direccion || null, id]
+      );
+      // Si envia credenciales, actualizar el admin de esa empresa
+      if (admin_username || admin_password || admin_nombre) {
+        // Buscar el admin principal de esa empresa
+        const adminRes = await client.query(
+          `SELECT id FROM users WHERE tenant_id = $1 AND rol = 'admin' ORDER BY creado_en ASC LIMIT 1`,
+          [id]
+        );
+        if (adminRes.rows.length > 0) {
+          const adminId = adminRes.rows[0].id;
+          // Construir update dinamico segun lo que se envie
+          if (admin_username) {
+            const usuarioLimpio = admin_username.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const emailInterno = usuarioLimpio + '@empresa.local';
+            await client.query(`UPDATE users SET email = $1 WHERE id = $2`, [emailInterno, adminId]);
+          }
+          if (admin_password) {
+            const hashed = await bcrypt.hash(admin_password, 10);
+            await client.query(`UPDATE users SET password = $1 WHERE id = $2`, [hashed, adminId]);
+          }
+          if (admin_nombre) {
+            await client.query(`UPDATE users SET nombre = $1 WHERE id = $2`, [admin_nombre, adminId]);
+          }
+        }
+      }
+      await client.query('COMMIT');
+      res.json({ success: true, data: result.rows[0] });
+    } catch (errTx) {
+      await client.query('ROLLBACK');
+      throw errTx;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// DELETE /tenant/sub-empresa/:id - Eliminar una sub-empresa propia SOLO si esta vacia
+router.delete('/sub-empresa/:id', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ success: false, mensaje: 'Solo el admin puede eliminar empresas' });
+    }
+    const { id } = req.params;
+    // Validar que la empresa sea hija del usuario actual
+    const check = await pool.query(
+      `SELECT id FROM tenants WHERE id = $1 AND parent_tenant_id = $2`,
+      [id, req.user.tenant_id]
+    );
+    if (check.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Empresa no encontrada o no tiene permiso' });
+    }
+    // Verificar que este vacia (sin facturas, clientes ni productos)
+    const facturas = await pool.query(`SELECT COUNT(*) as t FROM invoices WHERE tenant_id = $1`, [id]);
+    const clientes = await pool.query(`SELECT COUNT(*) as t FROM customers WHERE tenant_id = $1`, [id]);
+    const productos = await pool.query(`SELECT COUNT(*) as t FROM products WHERE tenant_id = $1`, [id]);
+    if (parseInt(facturas.rows[0].t) > 0 || parseInt(clientes.rows[0].t) > 0 || parseInt(productos.rows[0].t) > 0) {
+      return res.status(400).json({ success: false, mensaje: 'No se puede eliminar: la empresa tiene datos (facturas, clientes o productos). Solo se pueden eliminar empresas vacias.' });
+    }
+    await client.query('BEGIN');
+    // Borrar usuarios de la empresa y luego la empresa
+    await client.query(`DELETE FROM users WHERE tenant_id = $1`, [id]);
+    await client.query(`DELETE FROM operadores WHERE tenant_id = $1`, [id]);
+    await client.query(`DELETE FROM vendedores WHERE tenant_id = $1`, [id]);
+    await client.query(`DELETE FROM tenants WHERE id = $1`, [id]);
+    await client.query('COMMIT');
+    res.json({ success: true, mensaje: 'Empresa eliminada' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
