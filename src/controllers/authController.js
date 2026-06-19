@@ -292,4 +292,108 @@ const cambiarCredenciales = async (req, res) => {
   }
 };
 
-module.exports = { register, login, cambiarCredenciales };
+// ── Selector: la empresa del usuario + las sub-empresas que ha creado ──
+const listarEmpresasSelector = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const result = await pool.query(
+      `SELECT id, nombre, rnc, estado,
+              (id = $1) as es_principal
+       FROM tenants
+       WHERE estado = 'activo'
+         AND (id = $1 OR parent_tenant_id = $1)
+       ORDER BY (id = $1) DESC, nombre ASC`,
+      [tenantId]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error('Error al listar empresas selector:', error.message);
+    res.status(500).json({ success: false, mensaje: 'Error interno del servidor' });
+  }
+};
+
+// ── Login por empresa: valida credenciales de la empresa seleccionada y emite token de esa empresa ──
+const loginEmpresa = async (req, res) => {
+  try {
+    const { empresa_id, usuario, email, password } = req.body;
+    if (!empresa_id || !password || (!usuario && !email)) {
+      return res.status(400).json({ success: false, mensaje: 'Datos incompletos' });
+    }
+    // Verificar que la empresa exista y este activa
+    const empresaRes = await pool.query(
+      `SELECT id, nombre, estado FROM tenants WHERE id = $1`,
+      [empresa_id]
+    );
+    if (empresaRes.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Empresa no encontrada' });
+    }
+    if (empresaRes.rows[0].estado !== 'activo') {
+      return res.status(401).json({ success: false, mensaje: 'Empresa suspendida. Contacte soporte.' });
+    }
+    // Resolver login_input (usuario simple -> email interno)
+    let login_input = email || usuario;
+    if (login_input && !login_input.includes('@')) {
+      const usuarioLimpio = login_input.toLowerCase().replace(/[^a-z0-9]/g, '');
+      login_input = usuarioLimpio + '@empresa.local';
+    }
+    // 1. Buscar admin en users DENTRO de esa empresa
+    const resultUser = await pool.query(
+      `SELECT u.*, t.nombre as empresa FROM users u
+       JOIN tenants t ON u.tenant_id = t.id
+       WHERE u.email = $1 AND u.tenant_id = $2`,
+      [login_input, empresa_id]
+    );
+    if (resultUser.rows.length > 0) {
+      const user = resultUser.rows[0];
+      const passwordValido = await bcrypt.compare(password, user.password);
+      if (!passwordValido) {
+        return res.status(401).json({ success: false, mensaje: 'Credenciales incorrectas' });
+      }
+      const token = jwt.sign(
+        { id: user.id, tenant_id: user.tenant_id, rol: user.rol, nombre: user.nombre },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN }
+      );
+      return res.json({
+        success: true,
+        mensaje: 'Login exitoso',
+        token,
+        requiere_cambio: user.primer_login === true,
+        usuario: { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, empresa: user.empresa, primer_login: user.primer_login === true }
+      });
+    }
+    // 2. Buscar operador DENTRO de esa empresa
+    const resultOperador = await pool.query(
+      `SELECT o.*, t.nombre as empresa FROM operadores o
+       JOIN tenants t ON o.tenant_id = t.id
+       WHERE o.username = $1 AND o.tenant_id = $2 AND o.activo = true`,
+      [(usuario || email || '').toLowerCase().trim(), empresa_id]
+    );
+    if (resultOperador.rows.length > 0) {
+      const operador = resultOperador.rows[0];
+      const passwordValido = await bcrypt.compare(password, operador.password);
+      if (!passwordValido) {
+        return res.status(401).json({ success: false, mensaje: 'Credenciales incorrectas' });
+      }
+      let modulosPermitidos = [];
+      try { modulosPermitidos = JSON.parse(operador.modulos_permitidos || '[]'); } catch (e) { modulosPermitidos = []; }
+      const token = jwt.sign(
+        { id: operador.id, tenant_id: operador.tenant_id, rol: 'operador', operador_id: operador.id, nombre: operador.nombre, modulos_permitidos: modulosPermitidos },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN }
+      );
+      return res.json({
+        success: true,
+        mensaje: 'Login exitoso',
+        token,
+        usuario: { id: operador.id, nombre: operador.nombre, rol: 'operador', empresa: operador.empresa, modulos_permitidos: modulosPermitidos }
+      });
+    }
+    return res.status(401).json({ success: false, mensaje: 'Credenciales incorrectas para esta empresa' });
+  } catch (error) {
+    console.error('Error en login empresa:', error.message);
+    res.status(500).json({ success: false, mensaje: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { register, login, cambiarCredenciales, listarEmpresasSelector, loginEmpresa };
