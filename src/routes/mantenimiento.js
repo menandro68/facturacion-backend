@@ -135,10 +135,17 @@ router.post('/vendedores', verifyToken, tenantGuard, async (req, res) => {
         [tenant_id, zona_id]
       );
       if (zonaOcupada.rows[0]) {
-        return res.status(400).json({ success: false, mensaje: `Esa zona ya está asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
+        return res.status(400).json({ success: false, mensaje: `Esa zona ya estÃ¡ asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
       }
     }
-
+    // Validar nombre de vendedor unico por empresa (tenant), sin distinguir mayusculas/espacios
+    const dupVend = await pool.query(
+      `SELECT nombre FROM vendedores WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
+      [tenant_id, nombre]
+    );
+    if (dupVend.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe un vendedor con el nombre "${dupVend.rows[0].nombre}". No se permiten duplicados.` });
+    }
     // Si existe un vendedor INACTIVO con el mismo usuario, reactivarlo en vez de insertar
     if (usuario) {
       const existente = await pool.query(
@@ -184,6 +191,15 @@ router.put('/vendedores/:id', verifyToken, tenantGuard, async (req, res) => {
       if (zonaOcupada.rows[0]) {
         return res.status(400).json({ success: false, mensaje: `Esa zona ya está asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
       }
+    }
+
+    // Validar nombre de vendedor unico por empresa (tenant), excluyendo el vendedor actual
+    const dupVendPut = await pool.query(
+      `SELECT nombre FROM vendedores WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo' AND id != $3`,
+      [tenant_id, nombre, id]
+    );
+    if (dupVendPut.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe otro vendedor con el nombre "${dupVendPut.rows[0].nombre}". No se permiten duplicados.` });
     }
 
     let password_hash_update = '';
@@ -245,6 +261,14 @@ router.post('/choferes', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { nombre, cedula, licencia, telefono, email, vehiculo, placa } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
+    // Validar nombre de chofer unico por empresa (tenant), sin distinguir mayusculas/espacios
+    const dupChofer = await pool.query(
+      `SELECT nombre FROM choferes WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
+      [tenant_id, nombre]
+    );
+    if (dupChofer.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe un chofer con el nombre "${dupChofer.rows[0].nombre}". No se permiten duplicados.` });
+    }
     const result = await pool.query(
       `INSERT INTO choferes (tenant_id, nombre, cedula, licencia, telefono, email, vehiculo, placa)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
@@ -261,6 +285,14 @@ router.put('/choferes/:id', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { id } = req.params;
     const { nombre, cedula, licencia, telefono, email, vehiculo, placa } = req.body;
+    // Validar nombre de chofer unico por empresa (tenant), excluyendo el chofer actual
+    const dupChoferPut = await pool.query(
+      `SELECT nombre FROM choferes WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo' AND id != $3`,
+      [tenant_id, nombre, id]
+    );
+    if (dupChoferPut.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe otro chofer con el nombre "${dupChoferPut.rows[0].nombre}". No se permiten duplicados.` });
+    }
     const result = await pool.query(
       `UPDATE choferes SET nombre=$1, cedula=$2, licencia=$3, telefono=$4, email=$5, vehiculo=$6, placa=$7, actualizado_en=NOW()
        WHERE id=$8 AND tenant_id=$9 RETURNING *`,

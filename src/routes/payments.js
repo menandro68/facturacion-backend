@@ -45,6 +45,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { invoice_id, monto, metodo, referencia, notas } = req.body;
     const vendedor_nombre = req.user?.nombre || null;
+    const estado_pago = req.user?.rol === 'vendedor' ? 'pendiente' : 'confirmado';
 
     if (!invoice_id) return res.status(400).json({ success: false, mensaje: 'invoice_id es requerido' });
     if (!monto) return res.status(400).json({ success: false, mensaje: 'El monto es requerido' });
@@ -66,9 +67,9 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
 
     // Registrar pago
     const payment = await client.query(
-      `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas, vendedor_nombre, estado, operador_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8) RETURNING *`,
-      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre, req.user.operador_id || null]
+  `INSERT INTO payments (tenant_id, invoice_id, monto, metodo, referencia, notas, vendedor_nombre, estado, operador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [tenant_id, invoice_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre, estado_pago, req.user.operador_id || null]
     );
 
 // Verificar si el pago cubre el total (SOLO pagos confirmados cuentan)
@@ -79,8 +80,14 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     const total_pagado = parseFloat(pagos.rows[0].total_pagado);
     const total_factura = parseFloat(invoice.rows[0].total);
 
-    // La factura NO se marca pagada aqui: el pago entra pendiente y debe
-    // ser confirmado por la administracion (endpoint /:id/confirmar)
+  // Si el pago entro CONFIRMADO (operador/admin) y cubre el total, marcar factura PAGADA.
+    // Los pagos de vendedor entran pendientes y se marcan al confirmarse en /:id/confirmar
+    if (estado_pago === 'confirmado' && total_pagado >= total_factura) {
+      await client.query(
+        `UPDATE invoices SET estado='pagada', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
+        [invoice_id, tenant_id]
+      );
+    }
 
     await client.query('COMMIT');
     res.status(201).json({

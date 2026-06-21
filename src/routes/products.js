@@ -51,6 +51,15 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_minimo DECIMAL(12,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_maximo DECIMAL(12,2) DEFAULT 0`);
 
+    // Validar nombre de articulo unico por empresa (tenant), sin distinguir mayusculas/espacios
+    const dupProd = await pool.query(
+      `SELECT nombre FROM products WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
+      [tenant_id, nombre]
+    );
+    if (dupProd.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe un artículo con el nombre "${dupProd.rows[0].nombre}". No se permiten duplicados.` });
+    }
+
     const result = await pool.query(
       `INSERT INTO products (tenant_id, nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
@@ -78,6 +87,15 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS suplidor VARCHAR(150)`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_minimo DECIMAL(12,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_maximo DECIMAL(12,2) DEFAULT 0`);
+
+    // Validar nombre de articulo unico por empresa (tenant), excluyendo el articulo actual
+    const dupProdPut = await pool.query(
+      `SELECT nombre FROM products WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo' AND id != $3`,
+      [tenant_id, nombre, id]
+    );
+    if (dupProdPut.rows[0]) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe otro artículo con el nombre "${dupProdPut.rows[0].nombre}". No se permiten duplicados.` });
+    }
 
     const result = await pool.query(
       `UPDATE products SET 

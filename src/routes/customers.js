@@ -43,10 +43,20 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(50)`);
-    if (vendedor_id && zona_id) {
+if (vendedor_id && zona_id) {
       const vend = await pool.query(`SELECT zona_id, nombre FROM vendedores WHERE id = $1 AND tenant_id = $2`, [vendedor_id, tenant_id]);
       if (vend.rows[0] && vend.rows[0].zona_id !== zona_id) {
         return res.status(400).json({ success: false, mensaje: `El vendedor ${vend.rows[0].nombre} no tiene asignada esta zona. Seleccione un vendedor que cubra la zona del cliente.` });
+      }
+    }
+    // Validar RNC/Cedula unico por empresa (tenant)
+    if (rnc_cedula && rnc_cedula.trim()) {
+      const dup = await pool.query(
+        `SELECT nombre FROM customers WHERE tenant_id = $1 AND rnc_cedula = $2 AND estado = 'activo'`,
+        [tenant_id, rnc_cedula.trim()]
+      );
+      if (dup.rows[0]) {
+        return res.status(400).json({ success: false, mensaje: `Ya existe un cliente con el RNC/Cédula ${rnc_cedula.trim()} (${dup.rows[0].nombre}). No se permiten duplicados.` });
       }
     }
     const result = await pool.query(
@@ -70,10 +80,20 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(50)`);
-    if (vendedor_id && zona_id) {
+if (vendedor_id && zona_id) {
       const vend = await pool.query(`SELECT zona_id, nombre FROM vendedores WHERE id = $1 AND tenant_id = $2`, [vendedor_id, tenant_id]);
       if (vend.rows[0] && vend.rows[0].zona_id !== zona_id) {
         return res.status(400).json({ success: false, mensaje: `El vendedor ${vend.rows[0].nombre} no tiene asignada esta zona. Seleccione un vendedor que cubra la zona del cliente.` });
+      }
+    }
+    // Validar RNC/Cedula unico por empresa (tenant), excluyendo el cliente actual
+    if (rnc_cedula && rnc_cedula.trim()) {
+      const dup = await pool.query(
+        `SELECT nombre FROM customers WHERE tenant_id = $1 AND rnc_cedula = $2 AND estado = 'activo' AND id != $3`,
+        [tenant_id, rnc_cedula.trim(), id]
+      );
+      if (dup.rows[0]) {
+        return res.status(400).json({ success: false, mensaje: `Ya existe otro cliente con el RNC/Cédula ${rnc_cedula.trim()} (${dup.rows[0].nombre}). No se permiten duplicados.` });
       }
     }
     const result = await pool.query(
