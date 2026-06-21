@@ -75,9 +75,9 @@ router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
       LEFT JOIN products p ON p.id = ii.product_id
       LEFT JOIN customers c ON c.id = i.customer_id
       WHERE i.tenant_id = $1
-        AND i.estado != 'anulada'
-        AND ($2::date IS NULL OR i.creado_en::date >= $2::date)
-        AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
+   AND i.estado != 'anulada'
+        AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+        AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
         AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
         AND ($5::uuid IS NULL OR i.customer_id = $5::uuid)
         AND ($6::text IS NULL OR ii.descripcion ILIKE $6::text)
@@ -141,18 +141,18 @@ router.get('/pedidos/lista', verifyToken, tenantGuard, async (req, res) => {
                FROM invoices i
                INNER JOIN customers c ON i.customer_id = c.id
                WHERE i.tenant_id = $1 AND i.estado = 'pedido'
-                 AND c.vendedor_id = $2::uuid
-                 AND ($3::date IS NULL OR i.creado_en::date >= $3::date)
-                 AND ($4::date IS NULL OR i.creado_en::date <= $4::date)
+             AND c.vendedor_id = $2::uuid
+                 AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+                 AND ($4::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
                ORDER BY i.creado_en DESC`;
       params = [tenant_id, vendedor_id, fecha_inicio || null, fecha_fin || null];
     } else {
       query = `SELECT i.*, c.nombre as cliente_nombre
                FROM invoices i
                LEFT JOIN customers c ON i.customer_id = c.id
-               WHERE i.tenant_id = $1 AND i.estado = 'pedido'
-                 AND ($2::date IS NULL OR i.creado_en::date >= $2::date)
-                 AND ($3::date IS NULL OR i.creado_en::date <= $3::date)
+        WHERE i.tenant_id = $1 AND i.estado = 'pedido'
+                 AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+                 AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
                ORDER BY i.creado_en DESC`;
       params = [tenant_id, fecha_inicio || null, fecha_fin || null];
     }
@@ -304,10 +304,11 @@ WHERE tenant_id = $1 AND tipo_ncf = $2 AND activo = true
       }
     }
  const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
+ const operadorConvierte = req.user.operador_id || req.user.id || null;
     const updated = await client.query(
-    `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3
+    `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3, operador_id=$5
        WHERE id=$2 RETURNING *`,
-      [ncf, id, numero_factura, tipoNcf]
+      [ncf, id, numero_factura, tipoNcf, operadorConvierte]
     );
     await client.query('COMMIT');
     res.json({ success: true, data: updated.rows[0] });
@@ -1312,9 +1313,9 @@ router.get('/chofer/:chofer_id/entregas', verifyToken, tenantGuard, async (req, 
        LEFT JOIN choferes ch ON i.chofer_id = ch.id
        WHERE i.tenant_id = $1
          AND i.chofer_id = $2
-         AND i.estado != 'anulada'
-         AND ($3::date IS NULL OR i.fecha_emision::date >= $3::date)
-         AND ($4::date IS NULL OR i.fecha_emision::date <= $4::date)
+    AND i.estado != 'anulada'
+         AND ($3::date IS NULL OR (i.fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+         AND ($4::date IS NULL OR (i.fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
        ORDER BY i.fecha_emision DESC`,
       [tenant_id, chofer_id, fecha_inicio || null, fecha_fin || null]
     );

@@ -241,8 +241,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       WHERE tenant_id = $1
         AND operador_id = $2
         AND estado = 'emitida'
-        AND ($3::date IS NULL OR creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 2. KPIs - Pedidos creados
@@ -252,8 +252,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       WHERE tenant_id = $1
         AND operador_id = $2
         AND estado = 'pedido'
-        AND ($3::date IS NULL OR creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 3. KPIs - Cotizaciones creadas
@@ -263,8 +263,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       WHERE tenant_id = $1
         AND operador_id = $2
         AND estado = 'cotizacion'
-        AND ($3::date IS NULL OR creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 4. KPIs - Notas de crédito creadas
@@ -274,8 +274,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       WHERE tenant_id = $1
         AND operador_id = $2
         AND estado = 'nota_credito'
-        AND ($3::date IS NULL OR creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 5. KPIs - Facturas anuladas por este operador
@@ -285,8 +285,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       WHERE tenant_id = $1
         AND anulado_por = $2
         AND estado = 'anulada'
-        AND ($3::date IS NULL OR anulado_en::date >= $3::date)
-        AND ($4::date IS NULL OR anulado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (anulado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (anulado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 6. KPIs - Pagos recibidos
@@ -295,8 +295,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       FROM payments
       WHERE tenant_id = $1
         AND operador_id = $2
-        AND ($3::date IS NULL OR creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 7. Detalle - Lista de transacciones (facturas, pedidos, etc.)
@@ -320,8 +320,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       LEFT JOIN customers c ON i.customer_id = c.id
       WHERE i.tenant_id = $1
         AND (i.operador_id = $2 OR i.anulado_por = $2)
-        AND ($3::date IS NULL OR i.creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR i.creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
       ORDER BY i.creado_en DESC
       LIMIT 200
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
@@ -341,8 +341,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       LEFT JOIN customers c ON i.customer_id = c.id
       WHERE p.tenant_id = $1
         AND p.operador_id = $2
-        AND ($3::date IS NULL OR p.creado_en::date >= $3::date)
-        AND ($4::date IS NULL OR p.creado_en::date <= $4::date)
+        AND ($3::date IS NULL OR (p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
       ORDER BY p.creado_en DESC
       LIMIT 200
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
