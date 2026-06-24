@@ -9,7 +9,8 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const result = await pool.query(
-      `SELECT i.*, p.nombre as producto_nombre, p.precio, p.descripcion
+ `SELECT i.*, p.nombre as producto_nombre, p.precio, p.descripcion,
+              p.stock_minimo as prod_stock_minimo, p.stock_maximo as prod_stock_maximo, p.suplidor
        FROM inventory i
        JOIN products p ON i.product_id = p.id
        WHERE i.tenant_id = $1
