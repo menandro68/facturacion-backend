@@ -75,15 +75,15 @@ router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { fecha_inicio, fecha_fin, vendedor_id, customer_id, producto } = req.query;
     const result = await pool.query(`
-      SELECT 
+SELECT 
         ii.descripcion,
-        SUM(ii.cantidad) as total_cantidad,
+        SUM(ii.cantidad * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_cantidad,
         ii.precio_unitario,
-        SUM(ii.subtotal) as total_subtotal,
-        SUM(ii.itbis_monto) as total_itbis,
-        SUM(ii.total) as total_venta,
-        COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0)), 0) as total_costo,
-        SUM(ii.subtotal) - COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0)), 0) as beneficio
+        SUM(ii.subtotal * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_subtotal,
+        SUM(ii.itbis_monto * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_itbis,
+        SUM(ii.total * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_venta,
+        COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0) * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END), 0) as total_costo,
+        SUM(ii.subtotal * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) - COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0) * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END), 0) as beneficio
       FROM invoices i
       LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
       LEFT JOIN products p ON p.id = ii.product_id
@@ -148,7 +148,11 @@ COALESCE((
 router.get('/pedidos/lista', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { vendedor_id, fecha_inicio, fecha_fin } = req.query;
+    let { vendedor_id, fecha_inicio, fecha_fin } = req.query;
+    // Si quien pide es un VENDEDOR, forzar su propio vendedor_id (solo ve sus pedidos)
+    if (req.user.rol === 'vendedor' && req.user.vendedor_id) {
+      vendedor_id = req.user.vendedor_id;
+    }
     let query, params;
     if (vendedor_id) {
       query = `SELECT i.*, c.nombre as cliente_nombre

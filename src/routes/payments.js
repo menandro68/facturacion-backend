@@ -77,8 +77,14 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE invoice_id = $1 AND estado = 'confirmado'`,
       [invoice_id]
     );
+    // Restar notas de credito aplicadas a esta factura
+    const ncSum = await client.query(
+      `SELECT COALESCE(SUM(total), 0) as total_nc FROM invoices WHERE referencia_id = $1 AND estado = 'nota_credito' AND tenant_id = $2`,
+      [invoice_id, tenant_id]
+    );
     const total_pagado = parseFloat(pagos.rows[0].total_pagado);
-    const total_factura = parseFloat(invoice.rows[0].total);
+    const total_nc = parseFloat(ncSum.rows[0].total_nc);
+    const total_factura = parseFloat(invoice.rows[0].total) - total_nc;
 
   // Si el pago entro CONFIRMADO (operador/admin) y cubre el total, marcar factura PAGADA.
     // Los pagos de vendedor entran pendientes y se marcan al confirmarse en /:id/confirmar
@@ -223,13 +229,18 @@ const result = await pool.query(
       `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE invoice_id = $1 AND estado = 'confirmado'`,
       [invoiceId]
     );
-    const facturaRow = await pool.query(
+const facturaRow = await pool.query(
       `SELECT total FROM invoices WHERE id = $1 AND tenant_id = $2`,
+      [invoiceId, tenant_id]
+    );
+    const ncSumConf = await pool.query(
+      `SELECT COALESCE(SUM(total), 0) as total_nc FROM invoices WHERE referencia_id = $1 AND estado = 'nota_credito' AND tenant_id = $2`,
       [invoiceId, tenant_id]
     );
     if (facturaRow.rows[0]) {
       const totalPagado = parseFloat(sumConf.rows[0].total_pagado);
-      const totalFactura = parseFloat(facturaRow.rows[0].total);
+      const totalNc = parseFloat(ncSumConf.rows[0].total_nc);
+      const totalFactura = parseFloat(facturaRow.rows[0].total) - totalNc;
       if (totalPagado >= totalFactura) {
         await pool.query(
           `UPDATE invoices SET estado='pagada', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,

@@ -71,7 +71,7 @@ const register = async (req, res) => {
 
 // LOGIN
 const login = async (req, res) => {
-  const { email, usuario, password } = req.body;
+  const { email, usuario, password, rol_esperado } = req.body;
 
   try {
     if ((!email && !usuario) || !password) {
@@ -98,7 +98,9 @@ const login = async (req, res) => {
 
     if (resultUser.rows.length > 0) {
       const user = resultUser.rows[0];
-
+      if (rol_esperado && rol_esperado !== 'admin') {
+        return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
+      }
       if (user.tenant_estado !== 'activo') {
         return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
       }
@@ -141,6 +143,9 @@ return res.json({
     if (resultOperador.rows.length > 0) {
       const operador = resultOperador.rows[0];
 
+      if (rol_esperado && rol_esperado !== 'operador') {
+        return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
+      }
       if (operador.tenant_estado !== 'activo') {
         return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
       }
@@ -199,6 +204,9 @@ return res.json({
 
     const vendedor = resultVendedor.rows[0];
 
+    if (rol_esperado && rol_esperado !== 'vendedor') {
+      return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
+    }
     if (vendedor.tenant_estado !== 'activo') {
       return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
     }
