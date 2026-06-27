@@ -89,7 +89,7 @@ const login = async (req, res) => {
       login_input = usuarioLimpio + '@empresa.local';
     }
     const resultUser = await pool.query(
-      `SELECT u.*, t.nombre as empresa, t.estado as tenant_estado 
+ `SELECT u.*, t.nombre as empresa, t.estado as tenant_estado, t.parent_tenant_id 
        FROM users u 
        JOIN tenants t ON u.tenant_id = t.id 
        WHERE u.email = $1`,
@@ -120,7 +120,8 @@ return res.json({
         mensaje: 'Login exitoso ✅',
         token,
         requiere_cambio: user.primer_login === true,
-        usuario: {
+     usuario: {
+          es_matriz: user.parent_tenant_id === null,
           id: user.id,
           nombre: user.nombre,
           email: user.email,
@@ -305,8 +306,9 @@ const listarEmpresasSelector = async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
     const result = await pool.query(
-      `SELECT id, nombre, rnc, estado,
-              (id = $1) as es_principal
+   `SELECT id, nombre, rnc, estado,
+              (id = $1) as es_principal,
+              (parent_tenant_id IS NULL) as es_matriz
        FROM tenants
        WHERE estado = 'activo'
          AND (id = $1 OR parent_tenant_id = $1)
