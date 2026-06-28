@@ -109,10 +109,22 @@ router.get('/reporte/resumen', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
     const { fecha_inicio, fecha_fin } = req.query;
 const result = await pool.query(`
-      SELECT 
+   SELECT 
         COALESCE(SUM(i.subtotal), 0) as total_subtotal,
         COALESCE(SUM(i.itbis), 0) as total_itbis,
-        COALESCE(SUM(i.total), 0) as total_ventas,
+        COALESCE(SUM(i.total), 0) - COALESCE((
+          SELECT SUM(nc.total)
+          FROM invoices nc
+          WHERE nc.tenant_id = $1
+            AND nc.estado = 'nota_credito'
+            AND nc.referencia_id IN (
+              SELECT id FROM invoices
+              WHERE tenant_id = $1
+                AND estado IN ('emitida', 'pagada')
+                AND ($2::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+                AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
+            )
+        ), 0) as total_ventas,
 COALESCE((
           SELECT SUM(ii.cantidad * COALESCE(p.costo, 0))
           FROM invoice_items ii
@@ -474,7 +486,22 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       subtotal += item_subtotal;
       itbis += item_itbis;
     }
-    const total = subtotal + itbis;
+const total = subtotal + itbis;
+    // Blindaje: no permitir facturas con valores negativos o en cero
+    for (const item of items) {
+      if (parseFloat(item.cantidad) <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, mensaje: 'La cantidad debe ser mayor que cero' });
+      }
+      if (parseFloat(item.precio_unitario) <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, mensaje: 'El precio unitario debe ser mayor que cero' });
+      }
+    }
+    if (total <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'El total de la factura no puede ser negativo ni cero' });
+    }
     let ncf;
     let codigo_seguridad = null;
     let fecha_vencimiento_encf = null;
