@@ -44,13 +44,20 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
 const result = await pool.query(
       `SELECT i.*, c.nombre as cliente_nombre,
-              COALESCE((
+        COALESCE((
                 SELECT SUM(nc.total)
                 FROM invoices nc
                 WHERE nc.referencia_id = i.id
                   AND nc.estado = 'nota_credito'
                   AND nc.tenant_id = i.tenant_id
               ), 0) as nc_aplicada,
+              COALESCE((
+                SELECT SUM(nc.itbis)
+                FROM invoices nc
+                WHERE nc.referencia_id = i.id
+                  AND nc.estado = 'nota_credito'
+                  AND nc.tenant_id = i.tenant_id
+              ), 0) as nc_itbis,
               (i.total - COALESCE((
                 SELECT SUM(nc.total)
                 FROM invoices nc
