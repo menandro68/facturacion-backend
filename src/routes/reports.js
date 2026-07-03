@@ -16,13 +16,14 @@ router.get('/ventas', verifyToken, tenantGuard, async (req, res) => {
         COUNT(CASE WHEN estado = 'emitida' THEN 1 END) as emitidas,
         COUNT(CASE WHEN estado = 'pagada' THEN 1 END) as pagadas,
         COUNT(CASE WHEN estado = 'anulada' THEN 1 END) as anuladas,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN subtotal END), 0) as total_subtotal,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN itbis END), 0) as total_itbis,
-        COALESCE(SUM(CASE WHEN estado != 'anulada' THEN total END), 0) as total_ventas
-       FROM invoices
+        COALESCE(SUM(subtotal - COALESCE((SELECT SUM(nc.subtotal) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_subtotal,
+        COALESCE(SUM(itbis - COALESCE((SELECT SUM(nc.itbis) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_itbis,
+        COALESCE(SUM(total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_ventas
+       FROM invoices i
        WHERE tenant_id = $1
-       AND ($2::date IS NULL OR fecha_emision >= $2::date)
-       AND ($3::date IS NULL OR fecha_emision <= $3::date + INTERVAL '1 day')`,
+       AND estado IN ('emitida', 'pagada')
+       AND ($2::date IS NULL OR (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+       AND ($3::date IS NULL OR (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)`,
       [tenant_id, desde || null, hasta || null]
     );
     res.json({ success: true, data: result.rows[0] });
@@ -39,18 +40,18 @@ router.get('/itbis', verifyToken, tenantGuard, async (req, res) => {
 
     const result = await pool.query(
       `SELECT 
-        DATE_TRUNC('month', fecha_emision) as mes,
+       DATE_TRUNC('month', fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') as mes,
         COUNT(*) as total_facturas,
-        COALESCE(SUM(subtotal), 0) as total_subtotal,
-        COALESCE(SUM(itbis), 0) as total_itbis,
-        COALESCE(SUM(total), 0) as total_con_itbis
-       FROM invoices
+        COALESCE(SUM(subtotal - COALESCE((SELECT SUM(nc.subtotal) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_subtotal,
+        COALESCE(SUM(itbis - COALESCE((SELECT SUM(nc.itbis) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_itbis,
+        COALESCE(SUM(total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0)), 0) as total_con_itbis
+       FROM invoices i
        WHERE tenant_id = $1
-       AND estado != 'anulada'
+       AND estado IN ('emitida', 'pagada')
        AND fecha_emision IS NOT NULL
-       AND ($2::date IS NULL OR fecha_emision >= $2::date)
-       AND ($3::date IS NULL OR fecha_emision <= $3::date + INTERVAL '1 day')
-       GROUP BY DATE_TRUNC('month', fecha_emision)
+       AND ($2::date IS NULL OR (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+       AND ($3::date IS NULL OR (fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
+       GROUP BY DATE_TRUNC('month', fecha_emision AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')
        ORDER BY mes DESC`,
       [tenant_id, desde || null, hasta || null]
     );
@@ -95,9 +96,9 @@ router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
     // Resumen del día
 const hoy = await pool.query(
       `SELECT 
-        COUNT(*) FILTER (WHERE estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'anulada')) as facturas_hoy,
-        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador') THEN total END), 0) as ventas_hoy
-       FROM invoices
+        COUNT(*) FILTER (WHERE estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'anulada', 'pedido')) as facturas_hoy,
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as ventas_hoy
+       FROM invoices i
        WHERE tenant_id = $1
        AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
       [tenant_id]
@@ -115,11 +116,11 @@ const hoy = await pool.query(
     // Resumen del mes
     const mes = await pool.query(
       `SELECT 
-        COUNT(*) FILTER (WHERE estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'anulada')) as facturas_mes,
-        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador') THEN total END), 0) as ventas_mes,
-        COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as cobrado_mes,
-        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador') THEN total END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total END), 0) as pendiente_mes
-       FROM invoices
+        COUNT(*) FILTER (WHERE estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'anulada', 'pedido')) as facturas_mes,
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as ventas_mes,
+        COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as cobrado_mes,
+        COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as pendiente_mes
+       FROM invoices i
        WHERE tenant_id = $1
        AND DATE_TRUNC('month', creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
       [tenant_id]
@@ -131,7 +132,7 @@ const hoy = await pool.query(
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        WHERE i.tenant_id = $1
-       AND i.estado NOT IN ('nota_credito', 'cotizacion', 'borrador')
+       AND i.estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'pedido')
        ORDER BY i.creado_en DESC
        LIMIT 5`,
       [tenant_id]

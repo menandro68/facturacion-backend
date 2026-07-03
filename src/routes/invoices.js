@@ -51,13 +51,20 @@ const result = await pool.query(
                   AND nc.estado = 'nota_credito'
                   AND nc.tenant_id = i.tenant_id
               ), 0) as nc_aplicada,
-              COALESCE((
+      COALESCE((
                 SELECT SUM(nc.itbis)
                 FROM invoices nc
                 WHERE nc.referencia_id = i.id
                   AND nc.estado = 'nota_credito'
                   AND nc.tenant_id = i.tenant_id
               ), 0) as nc_itbis,
+              (
+                SELECT STRING_AGG(nc.ncf, ', ')
+                FROM invoices nc
+                WHERE nc.referencia_id = i.id
+                  AND nc.estado = 'nota_credito'
+                  AND nc.tenant_id = i.tenant_id
+              ) as nc_numeros,
               (i.total - COALESCE((
                 SELECT SUM(nc.total)
                 FROM invoices nc
@@ -95,8 +102,8 @@ SELECT
       LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
       LEFT JOIN products p ON p.id = ii.product_id
       LEFT JOIN customers c ON c.id = i.customer_id
-      WHERE i.tenant_id = $1
-   AND i.estado != 'anulada'
+WHERE i.tenant_id = $1
+   AND i.estado IN ('emitida', 'pagada', 'nota_credito')
         AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
         AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
         AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
