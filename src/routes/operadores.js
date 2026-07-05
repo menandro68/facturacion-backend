@@ -289,7 +289,7 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
         AND ($4::date IS NULL OR (anulado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
-    // 6. KPIs - Pagos recibidos
+// 6. KPIs - Pagos recibidos
     const pagos = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(monto), 0)::numeric as monto
       FROM payments
@@ -298,7 +298,36 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
+    // 7. KPIs - Devoluciones registradas por este operador
+    const devoluciones = await pool.query(`
+      SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
+      FROM devoluciones
+      WHERE tenant_id = $1
+        AND operador_id = $2
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+    `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
+    // 8. KPIs - Conduces creados por este operador
+    const conduces = await pool.query(`
+      SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
+      FROM conduces
+      WHERE tenant_id = $1
+        AND operador_id = $2
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+    `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
+   // 6.6 Registro de actividad (bitácora de todas las acciones del operador)
+    const actividad = await pool.query(`
+    SELECT id, modulo, accion, descripcion, referencia_id, creado_en
+      FROM actividad_operadores
+      WHERE tenant_id = $1
+        AND operador_id = $2
+        AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+      ORDER BY creado_en DESC
+      LIMIT 200
+    `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
     // 7. Detalle - Lista de transacciones (facturas, pedidos, etc.)
     const detalleFacturas = await pool.query(`
       SELECT
@@ -371,13 +400,22 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
             cantidad: anuladas.rows[0].cantidad,
             monto: parseFloat(anuladas.rows[0].monto)
           },
-          pagos: {
+     pagos: {
             cantidad: pagos.rows[0].cantidad,
             monto: parseFloat(pagos.rows[0].monto)
+          },
+          devoluciones: {
+            cantidad: devoluciones.rows[0].cantidad,
+            monto: parseFloat(devoluciones.rows[0].monto)
+          },
+          conduces: {
+            cantidad: conduces.rows[0].cantidad,
+            monto: parseFloat(conduces.rows[0].monto)
           }
         },
-        detalle_facturas: detalleFacturas.rows,
-        detalle_pagos: detallePagos.rows
+     detalle_facturas: detalleFacturas.rows,
+        detalle_pagos: detallePagos.rows,
+        registro_actividad: actividad.rows
       }
     });
   } catch (error) {

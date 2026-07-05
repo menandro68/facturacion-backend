@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const logActividad = require('../utils/logActividad');
 
 // GET - Listar cuentas por pagar
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -59,6 +60,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
        VALUES ($1, $2, $3, $4, $4, $5, $6) RETURNING *`,
       [tenant_id, supplier_id || null, descripcion, monto_total, fecha_vencimiento || null, notas || null]
     );
+    logActividad(req, 'cuentas_pagar', 'crear', `Creó cuenta por pagar: ${descripcion}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -104,6 +106,7 @@ router.put('/:id/abono', verifyToken, tenantGuard, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    logActividad(req, 'cuentas_pagar', 'abono', `Registró abono de RD$${parseFloat(monto).toLocaleString('es-DO')} a cuenta por pagar`, id);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -138,6 +141,7 @@ router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
       `DELETE FROM accounts_payable WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
     );
+    logActividad(req, 'cuentas_pagar', 'eliminar', 'Eliminó cuenta por pagar', id);
     res.json({ success: true, mensaje: 'Cuenta eliminada correctamente' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });

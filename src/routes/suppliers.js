@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const logActividad = require('../utils/logActividad');
 
 // GET - Listar proveedores
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -45,6 +46,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [tenant_id, nombre, rnc, email, telefono, direccion, contacto]
     );
+    logActividad(req, 'proveedores', 'crear', `Creó proveedor ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -63,6 +65,7 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
       [nombre, rnc, email, telefono, direccion, contacto, id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Proveedor no encontrado' });
+    logActividad(req, 'proveedores', 'editar', `Editó proveedor ${nombre}`, id);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -96,6 +99,7 @@ router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
       `UPDATE suppliers SET estado='inactivo', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
     );
+    logActividad(req, 'proveedores', 'eliminar', 'Eliminó proveedor', id);
     res.json({ success: true, mensaje: 'Proveedor eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });

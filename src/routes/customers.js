@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const logActividad = require('../utils/logActividad');
 
 // GET - Listar clientes
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -65,6 +66,7 @@ if (vendedor_id && zona_id) {
       [tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo || 'consumidor_final',
        vendedor_id || null, zona_id || null, condiciones || null]
     );
+    logActividad(req, 'clientes', 'crear', `Creó cliente ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -104,6 +106,7 @@ if (vendedor_id && zona_id) {
        vendedor_id || null, zona_id || null, condiciones || null, id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Cliente no encontrado' });
+    logActividad(req, 'clientes', 'editar', `Editó cliente ${nombre}`, id);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -181,6 +184,7 @@ router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
       `UPDATE customers SET estado='inactivo', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
     );
+    logActividad(req, 'clientes', 'eliminar', `Eliminó cliente ${nombreCliente}`, id);
     res.json({ success: true, mensaje: 'Cliente eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });

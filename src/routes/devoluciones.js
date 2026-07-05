@@ -77,10 +77,10 @@ router.post('/', async (req, res) => {
     const total = subtotal + itbis
 
     // Insertar devolucion
-    const dev = await client.query(`
-      INSERT INTO devoluciones (tenant_id, numero, factura_id, factura_ncf, customer_id, cliente_nombre, motivo, estado, subtotal, itbis, total, creado_por)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8, $9, $10, $11) RETURNING *
-    `, [req.user.tenant_id, numero, factura_id, factura_ncf || null, customer_id || null, cliente_nombre || null, motivo || '', subtotal, itbis, total, creado_por || null])
+const dev = await client.query(`
+      INSERT INTO devoluciones (tenant_id, numero, factura_id, factura_ncf, customer_id, cliente_nombre, motivo, estado, subtotal, itbis, total, creado_por, operador_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8, $9, $10, $11, $12) RETURNING *
+    `, [req.user.tenant_id, numero, factura_id, factura_ncf || null, customer_id || null, cliente_nombre || null, motivo || '', subtotal, itbis, total, creado_por || null, req.user.operador_id || null])
 
     // Insertar items
     for (const item of items) {

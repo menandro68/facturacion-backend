@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const logActividad = require('../utils/logActividad');
 
 // GET - Listar productos
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -67,6 +68,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
        costo || 0, codigo || null, comision_vendedor || 0, beneficio || 0, suplidor || null,
        stock_minimo || 0, stock_maximo || 0]
     );
+    logActividad(req, 'articulos', 'crear', `Creó artículo ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -108,6 +110,7 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
        stock_minimo || 0, stock_maximo || 0, id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Producto no encontrado' });
+    logActividad(req, 'articulos', 'editar', `Editó artículo ${nombre}`, id);
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
@@ -153,6 +156,7 @@ router.delete('/:id', verifyToken, tenantGuard, async (req, res) => {
       `UPDATE products SET estado='inactivo', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
       [id, tenant_id]
     );
+    logActividad(req, 'articulos', 'eliminar', `Eliminó artículo ${nombreProducto}`, id);
     res.json({ success: true, mensaje: 'Articulo eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });

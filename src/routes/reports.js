@@ -75,8 +75,8 @@ router.get('/clientes', verifyToken, tenantGuard, async (req, res) => {
         COALESCE(SUM(CASE WHEN i.estado != 'anulada' THEN i.total END), 0) as total_facturado,
         COALESCE(SUM(CASE WHEN i.estado = 'pagada' THEN i.total END), 0) as total_pagado,
         COALESCE(SUM(CASE WHEN i.estado = 'emitida' THEN i.total END), 0) as total_pendiente
-       FROM customers c
-       LEFT JOIN invoices i ON c.id = i.customer_id
+     FROM customers c
+       LEFT JOIN invoices i ON c.id = i.customer_id AND i.estado IN ('emitida', 'pagada')
        WHERE c.tenant_id = $1
        GROUP BY c.id, c.nombre, c.rnc_cedula
        ORDER BY total_facturado DESC`,

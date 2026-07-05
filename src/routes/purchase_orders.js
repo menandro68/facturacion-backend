@@ -3,6 +3,7 @@ const router = express.Router()
 const pool = require('../config/db')
 const verifyToken = require('../middleware/auth')
 const tenantGuard = require('../middleware/tenantGuard')
+const logActividad = require('../utils/logActividad')
 
 router.use(verifyToken, tenantGuard)
 
@@ -84,6 +85,7 @@ router.post('/', async (req, res) => {
       `, [orden.rows[0].id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, subtotal])
     }
     await client.query('COMMIT')
+    logActividad(req, 'ordenes_compra', 'crear', 'Creó orden de compra', orden.rows[0].id)
     res.json({ mensaje: 'Orden creada', data: orden.rows[0] })
   } catch (err) {
     await client.query('ROLLBACK')
@@ -115,6 +117,7 @@ router.put('/:id/editar', async (req, res) => {
       }
     }
     await client.query('COMMIT')
+    logActividad(req, 'ordenes_compra', 'editar', 'Editó orden de compra', req.params.id)
     res.json({ mensaje: 'Orden actualizada' })
   } catch (err) {
     await client.query('ROLLBACK')
@@ -228,6 +231,7 @@ router.put('/:id/estado', async (req, res) => {
     }
 
     await client.query('COMMIT')
+    logActividad(req, 'ordenes_compra', 'cambiar_estado', `Cambió estado de orden de compra a ${estado}`, id)
     res.json({ mensaje: 'Estado actualizado' })
   } catch (err) {
     await client.query('ROLLBACK')
@@ -274,6 +278,7 @@ router.put('/:id/pagar', async (req, res) => {
     )
 
     await client.query('COMMIT')
+    logActividad(req, 'ordenes_compra', 'pagar', `Registró pago de RD$${parseFloat(monto).toLocaleString('es-DO')} a orden de compra`, id)
     res.json({ success: true, mensaje: 'Pago registrado', monto_pagado: nuevoPagado, estado_pago: estadoPago })
   } catch (err) {
     await client.query('ROLLBACK')
@@ -290,6 +295,7 @@ router.delete('/:id', async (req, res) => {
       'DELETE FROM purchase_orders WHERE id = $1 AND tenant_id = $2',
       [req.params.id, req.user.tenant_id]
     )
+    logActividad(req, 'ordenes_compra', 'eliminar', 'Eliminó orden de compra', req.params.id)
     res.json({ mensaje: 'Orden eliminada' })
   } catch (err) {
     res.status(500).json({ mensaje: err.message })

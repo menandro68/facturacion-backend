@@ -44,6 +44,7 @@ const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS chofer_nombre VARCHAR(255)`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS notas TEXT`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'activo'`);
+    await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS operador_id UUID`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW()`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS anulado_en TIMESTAMP`);
     await pool.query(`ALTER TABLE conduces ADD COLUMN IF NOT EXISTS inventario_rebajado BOOLEAN DEFAULT false`);
@@ -143,10 +144,10 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     const numeroConduce = parseInt(maxNum.rows[0].siguiente);
     const numeroTexto = 'CD-' + String(numeroConduce).padStart(4, '0');
 
-    const conduce = await client.query(
-      `INSERT INTO conduces (tenant_id, numero_conduce, numero, customer_id, cliente_nombre, chofer_id, chofer_nombre, notas, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'emitido') RETURNING *`,
-      [tenant_id, numeroConduce, numeroTexto, customer_id, clienteNombre, chofer_id || null, choferNombre, notas || null]
+ const conduce = await client.query(
+      `INSERT INTO conduces (tenant_id, numero_conduce, numero, customer_id, cliente_nombre, chofer_id, chofer_nombre, notas, estado, operador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'emitido', $9) RETURNING *`,
+      [tenant_id, numeroConduce, numeroTexto, customer_id, clienteNombre, chofer_id || null, choferNombre, notas || null, req.user.operador_id || null]
     );
 
     const conduceId = conduce.rows[0].id;

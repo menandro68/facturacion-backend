@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
+const logActividad = require('../utils/logActividad');
 
 // GET - Listar inventario
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
@@ -138,6 +139,7 @@ router.put('/:id/movimiento', verifyToken, tenantGuard, async (req, res) => {
     );
 
     await client.query('COMMIT');
+    logActividad(req, 'inventario', tipo, `Movimiento de inventario: ${tipo} de ${cantidad} (stock ${stock_anterior} → ${stock_nuevo})${motivo ? ' - ' + motivo : ''}`, id);
     res.json({ success: true, data: { stock_anterior, stock_nuevo, tipo, cantidad } });
   } catch (error) {
     await client.query('ROLLBACK');
