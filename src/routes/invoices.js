@@ -397,6 +397,28 @@ router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
     if (!facturaOrig.rows[0]) {
       return res.status(404).json({ success: false, mensaje: 'Factura no encontrada o no emitida' });
     }
+ const itemsFactura = await client.query(
+      `SELECT product_id, SUM(cantidad) as cantidad_facturada FROM invoice_items WHERE invoice_id=$1 GROUP BY product_id`,
+      [factura_id]
+    );
+    for (const item of items) {
+      const cant = parseFloat(item.cantidad);
+      if (!(cant > 0)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, mensaje: `Cantidad invalida en "${item.descripcion}": debe ser mayor que 0` });
+      }
+      if (item.product_id) {
+        const orig = itemsFactura.rows.find(f => f.product_id === item.product_id);
+        if (!orig) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, mensaje: `El producto "${item.descripcion}" no esta en la factura original` });
+        }
+        if (cant > parseFloat(orig.cantidad_facturada)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, mensaje: `La cantidad de "${item.descripcion}" (${cant}) supera lo facturado (${orig.cantidad_facturada})` });
+        }
+      }
+    }
     let seq = await client.query(
       `SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='NC' AND estado='activo'`, [tenant_id]
     );
@@ -407,6 +429,8 @@ router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
       );
       seq = await client.query(`SELECT * FROM ncf_sequences WHERE tenant_id=$1 AND tipo='NC'`, [tenant_id]);
     }
+     
+
     const nueva_sec = seq.rows[0].secuencia_actual + 1;
     await client.query(`UPDATE ncf_sequences SET secuencia_actual=$1 WHERE id=$2`, [nueva_sec, seq.rows[0].id]);
     const nc_numero = `NC${String(nueva_sec).padStart(8,'0')}`;
@@ -1532,8 +1556,27 @@ WHERE tenant_id = $1 AND tipo_ncf = $2 AND activo = true
        WHERE id = $1 AND secuencia_actual <= secuencia_hasta RETURNING secuencia_actual`,
       [secuencia.id]
     );
-    if (updSeq.rows.length === 0) {
+if (updSeq.rows.length === 0) {
       return res.status(400).json({ success: false, mensaje: `La secuencia NCF ${tipoNcf} se agoto` });
+    }
+
+    const itemsCot = await pool.query(`SELECT * FROM invoice_items WHERE invoice_id=$1`, [id]);
+    for (const item of itemsCot.rows) {
+      if (!item.product_id) continue;
+      const inv = await pool.query(
+        'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
+        [item.product_id, tenant_id]
+      );
+      if (inv.rows.length > 0) {
+        const stockNuevo = parseFloat(inv.rows[0].stock_actual) - parseFloat(item.cantidad);
+        await pool.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
+          [stockNuevo, inv.rows[0].id]);
+        await pool.query(
+          `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+           VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
+          [tenant_id, inv.rows[0].id, item.cantidad, inv.rows[0].stock_actual, stockNuevo, `Factura ${ncf} (Cotizacion)`]
+        );
+      }
     }
 
     const numQuery = await pool.query(
