@@ -350,7 +350,7 @@ WHERE tenant_id = $1 AND tipo_ncf = $2 AND activo = true
  const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
  const operadorConvierte = req.user.operador_id || req.user.id || null;
     const updated = await client.query(
-    `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3, operador_id=$5
+   `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3, operador_id=$5, origen='pedido'
        WHERE id=$2 RETURNING *`,
       [ncf, id, numero_factura, tipoNcf, operadorConvierte]
     );
@@ -1585,10 +1585,11 @@ if (updSeq.rows.length === 0) {
     );
     const numero_factura = numQuery.rows[0].siguiente;
 
+ const operadorConvierteCot = req.user.operador_id || req.user.id || null;
     const result = await pool.query(
-     `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3
+     `UPDATE invoices SET estado='emitida', ncf=$1, ncf_tipo=$4, fecha_emision=NOW(), creado_en=NOW(), actualizado_en=NOW(), numero_factura=$3, origen='cotizacion', operador_id=$5
        WHERE id=$2 RETURNING *`,
-      [ncf, id, numero_factura, tipoNcf]
+      [ncf, id, numero_factura, tipoNcf, operadorConvierteCot]
     );
 
     res.json({ success: true, data: result.rows[0] });

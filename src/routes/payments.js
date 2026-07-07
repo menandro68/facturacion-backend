@@ -216,10 +216,11 @@ router.put('/:id/confirmar', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
+const confirmadoPor = req.user.operador_id || req.user.id || null;
 const result = await pool.query(
-      `UPDATE payments SET estado='confirmado', confirmado_en=NOW()
+      `UPDATE payments SET estado='confirmado', confirmado_en=NOW(), confirmado_por=$3
        WHERE id = $1 AND tenant_id = $2 RETURNING *`,
-      [id, tenant_id]
+      [id, tenant_id, confirmadoPor]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Pago no encontrado' });
 

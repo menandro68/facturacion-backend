@@ -49,7 +49,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({
         success: false,
         mensaje: 'modulos_permitidos debe ser un array'
-      });
+      })
     }
 
 // Normalizar username a minusculas (el login busca en minusculas)
@@ -79,6 +79,19 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       });
     }
 
+   // Verificar que la contraseña no este en uso por otro operador
+    const opsExistentes = await pool.query(
+      `SELECT password FROM operadores WHERE tenant_id = $1`,
+      [tenant_id]
+    );
+    for (const op of opsExistentes.rows) {
+      if (await bcrypt.compare(password, op.password)) {
+        return res.status(400).json({
+          success: false,
+          mensaje: 'Esa contraseña ya esta en uso por otro usuario. Elija una diferente'
+        });
+      }
+    }
     // Hash de contraseña
     const passwordHash = await bcrypt.hash(password, 10);
 
@@ -168,11 +181,24 @@ router.put('/:id/password', verifyToken, tenantGuard, async (req, res) => {
     const { id } = req.params;
     const { password } = req.body;
 
-    if (!password || password.length < 4) {
+if (!password || password.length < 4) {
       return res.status(400).json({
         success: false,
         mensaje: 'La contraseña debe tener al menos 4 caracteres'
       });
+    }
+
+    const opsExistentes = await pool.query(
+      `SELECT password FROM operadores WHERE tenant_id = $1 AND id != $2`,
+      [tenant_id, id]
+    );
+    for (const op of opsExistentes.rows) {
+      if (await bcrypt.compare(password, op.password)) {
+        return res.status(400).json({
+          success: false,
+          mensaje: 'Esa contraseña ya esta en uso por otro usuario. Elija una diferente'
+        });
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -251,18 +277,18 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       FROM invoices
       WHERE tenant_id = $1
         AND operador_id = $2
-        AND estado = 'pedido'
+       AND (estado = 'pedido' OR origen = 'pedido')
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
-    // 3. KPIs - Cotizaciones creadas
+// 3. KPIs - Cotizaciones creadas
     const cotizaciones = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
       FROM invoices
       WHERE tenant_id = $1
         AND operador_id = $2
-        AND estado = 'cotizacion'
+        AND (estado = 'cotizacion' OR origen = 'cotizacion')
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
@@ -292,9 +318,9 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
 // 6. KPIs - Pagos recibidos
     const pagos = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(monto), 0)::numeric as monto
-      FROM payments
+  FROM payments
       WHERE tenant_id = $1
-        AND operador_id = $2
+        AND (operador_id = $2 OR confirmado_por = $2)
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
@@ -337,7 +363,9 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
         i.total,
         i.creado_en,
         c.nombre as cliente_nombre,
-        CASE
+    CASE
+          WHEN i.estado = 'emitida' AND i.origen = 'cotizacion' THEN 'Factura (de Cotizacion)'
+          WHEN i.estado = 'emitida' AND i.origen = 'pedido' THEN 'Factura (de Pedido)'
           WHEN i.estado = 'emitida' THEN 'Factura'
           WHEN i.estado = 'pedido' THEN 'Pedido'
           WHEN i.estado = 'cotizacion' THEN 'Cotizacion'
@@ -368,8 +396,8 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       FROM payments p
       LEFT JOIN invoices i ON p.invoice_id = i.id
       LEFT JOIN customers c ON i.customer_id = c.id
-      WHERE p.tenant_id = $1
-        AND p.operador_id = $2
+    WHERE p.tenant_id = $1
+        AND (p.operador_id = $2 OR p.confirmado_por = $2)
         AND ($3::date IS NULL OR (p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (p.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
       ORDER BY p.creado_en DESC
