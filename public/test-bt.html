@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prueba Impresora Bluetooth</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 24px; text-align: center; }
+  button { background: #2563eb; color: white; border: none; border-radius: 12px;
+           padding: 16px 24px; font-size: 18px; font-weight: 600; width: 100%; }
+  #log { text-align: left; background: #f3f4f6; border-radius: 8px; padding: 12px;
+         margin-top: 20px; font-size: 13px; white-space: pre-wrap; min-height: 200px; }
+</style>
+</head>
+<body>
+<h2>🖨️ Prueba Impresora Bluetooth</h2>
+<p>Enciende la impresora y toca el botón</p>
+<button onclick="probar()">🔍 Buscar impresora</button>
+<div id="log"></div>
+<script>
+const log = (m) => { document.getElementById('log').textContent += m + '\n' }
+
+async function probar() {
+  document.getElementById('log').textContent = ''
+  if (!navigator.bluetooth) {
+    log('❌ Este navegador NO soporta Web Bluetooth.')
+    log('Usa Chrome en Android.')
+    return
+  }
+  log('✅ Web Bluetooth disponible')
+  try {
+    log('Buscando dispositivos... (elige tu impresora)')
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2']
+    })
+    log('✅ Dispositivo elegido: ' + (device.name || '(sin nombre)'))
+    log('Conectando GATT...')
+    const server = await device.gatt.connect()
+    log('✅ Conectado por BLE')
+    log('Buscando servicios...')
+    const services = await server.getPrimaryServices()
+    log('✅ Servicios encontrados: ' + services.length)
+    for (const s of services) {
+      log('  Servicio: ' + s.uuid)
+      try {
+        const chars = await s.getCharacteristics()
+        for (const c of chars) {
+          log('    Caract: ' + c.uuid + (c.properties.write || c.properties.writeWithoutResponse ? '  [ESCRITURA OK]' : ''))
+        }
+      } catch(e) { log('    (sin características legibles)') }
+    }
+    log('')
+    log('🎉 TU IMPRESORA ES BLE — se puede imprimir SIN apps')
+  } catch (err) {
+    log('❌ ' + err.message)
+    log('')
+    log('Si no apareció tu impresora en la lista,')
+    log('es Bluetooth clásico → se necesita RawBT.')
+  }
+}
+</script>
+</body>
+</html>
