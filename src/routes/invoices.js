@@ -223,9 +223,9 @@ router.post('/pedido', verifyToken, tenantGuard, async (req, res) => {
       itbis += s * (parseFloat(item.itbis_rate || 0) / 100);
     }
     const total = subtotal + itbis;
-    const pedido = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, operador_id)
-       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW(), $7) RETURNING *`,
+const pedido = await client.query(
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, operador_id, operador_creador_id)
+       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW(), $7, $7) RETURNING *`,
       [tenant_id, customer_id || null, subtotal, itbis, total, notas || null, req.user.operador_id || null]
     );
     const pedido_id = pedido.rows[0].id;
@@ -1500,9 +1500,9 @@ router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
     });
     const total = subtotal + itbis;
 
-    const cotizacion = await pool.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, fecha_emision, operador_id)
-       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, NOW(), $6) RETURNING *`,
+ const cotizacion = await pool.query(
+      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, fecha_emision, operador_id, operador_creador_id)
+       VALUES ($1, $2, 'B01', 'cotizacion', $3, $4, $5, NOW(), $6, $6) RETURNING *`,
       [tenant_id, customer_id || null, subtotal, itbis, total, req.user.operador_id || null]
     );
 

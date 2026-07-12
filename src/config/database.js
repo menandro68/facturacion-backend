@@ -139,10 +139,11 @@ const createTables = async () => {
 
     // Agregar columnas operador_id, anulado_por, anulado_en a invoices
     await pool.query(`
-    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operador_id UUID;
+ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operador_id UUID;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS anulado_por UUID;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS anulado_en TIMESTAMP;
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS origen TEXT;
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operador_creador_id UUID;
     `);
     console.log('Columnas operador_id, anulado_por, anulado_en agregadas a invoices');
 

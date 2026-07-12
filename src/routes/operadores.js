@@ -272,23 +272,21 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
     // 2. KPIs - Pedidos creados
-    const pedidos = await pool.query(`
+const pedidos = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
       FROM invoices
       WHERE tenant_id = $1
-        AND operador_id = $2
-       AND (estado = 'pedido' OR origen = 'pedido')
+        AND ((estado = 'pedido' AND operador_id = $2) OR (origen = 'pedido' AND operador_creador_id = $2))
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
 // 3. KPIs - Cotizaciones creadas
-    const cotizaciones = await pool.query(`
+  const cotizaciones = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
       FROM invoices
       WHERE tenant_id = $1
-        AND operador_id = $2
-        AND (estado = 'cotizacion' OR origen = 'cotizacion')
+        AND ((estado = 'cotizacion' AND operador_id = $2) OR (origen = 'cotizacion' AND operador_creador_id = $2))
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
@@ -376,7 +374,7 @@ router.get('/reporte/actividad', verifyToken, tenantGuard, async (req, res) => {
       FROM invoices i
       LEFT JOIN customers c ON i.customer_id = c.id
       WHERE i.tenant_id = $1
-        AND (i.operador_id = $2 OR i.anulado_por = $2)
+       AND (i.operador_id = $2 OR i.anulado_por = $2 OR (i.operador_creador_id = $2 AND i.origen IN ('pedido', 'cotizacion')))
         AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
       ORDER BY i.creado_en DESC
