@@ -308,16 +308,17 @@ router.put('/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
     );
     const numero_factura = numQuery.rows[0].siguiente;
 
-    // 6. Calcular totales (con ITBIS)
+// 6. Calcular totales (precio con ITBIS incluido)
     let subtotal = 0;
     let itbis = 0;
     for (const it of items) {
       const cant = parseFloat(it.cantidad) || 0;
       const precio = parseFloat(it.precio_unitario) || 0;
       const rate = parseFloat(it.itbis_rate) || 0;
-      const sub = cant * precio;
-      subtotal += sub;
-      itbis += sub * (rate / 100);
+      const bruto = cant * precio;
+      const base = bruto / (1 + (rate / 100));
+      subtotal += base;
+      itbis += bruto - base;
     }
     const total = subtotal + itbis;
 
@@ -329,19 +330,18 @@ const invoice = await client.query(
        `Generada desde conduce ${conduce.numero || ''}`, numero_factura, conduce.chofer_id || null, req.user.operador_id || null, tipoNcf]
     );
     const invoice_id = invoice.rows[0].id;
-
-    // 8. Crear los items de la factura
+// 8. Crear los items de la factura (precio con ITBIS incluido)
     for (const it of items) {
       const cant = parseFloat(it.cantidad) || 0;
       const precio = parseFloat(it.precio_unitario) || 0;
       const rate = parseFloat(it.itbis_rate) || 0;
-      const item_subtotal = cant * precio;
-      const item_itbis = item_subtotal * (rate / 100);
-      const item_total = item_subtotal + item_itbis;
+      const item_bruto = cant * precio;
+      const item_base = item_bruto / (1 + (rate / 100));
+      const item_itbis = item_bruto - item_base;
       await client.query(
         `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [invoice_id, it.product_id || null, it.descripcion || '', cant, precio, rate, item_itbis, item_subtotal, item_total]
+        [invoice_id, it.product_id || null, it.descripcion || '', cant, precio, rate, item_itbis, item_base, item_bruto]
       );
     }
 

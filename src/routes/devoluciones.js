@@ -67,12 +67,13 @@ router.post('/', async (req, res) => {
     )
     const numero = `DEV-${String(parseInt(count.rows[0].count) + 1).padStart(4, '0')}`
 
-    // Calcular totales
+    // Calcular totales (precio con ITBIS incluido)
     let subtotal = 0, itbis = 0
     items.forEach(i => {
-      const s = parseFloat(i.cantidad) * parseFloat(i.precio_unitario)
-      subtotal += s
-      itbis += s * (parseFloat(i.itbis_rate || 0) / 100)
+      const bruto = parseFloat(i.cantidad) * parseFloat(i.precio_unitario)
+      const base = bruto / (1 + (parseFloat(i.itbis_rate || 0) / 100))
+      subtotal += base
+      itbis += bruto - base
     })
     const total = subtotal + itbis
 
@@ -84,11 +85,12 @@ const dev = await client.query(`
 
     // Insertar items
     for (const item of items) {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100))
       await client.query(`
         INSERT INTO devoluciones_items (devolucion_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, subtotal)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-      `, [dev.rows[0].id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, s])
+      `, [dev.rows[0].id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, base])
     }
 
     await client.query('COMMIT')

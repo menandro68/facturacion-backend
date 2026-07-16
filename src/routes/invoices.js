@@ -216,11 +216,12 @@ router.post('/pedido', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'El pedido debe tener al menos un item' });
     }
     await client.query('BEGIN');
-    let subtotal = 0, itbis = 0;
+let subtotal = 0, itbis = 0;
     for (const item of items) {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      subtotal += s;
-      itbis += s * (parseFloat(item.itbis_rate || 0) / 100);
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100));
+      subtotal += base;
+      itbis += bruto - base;
     }
     const total = subtotal + itbis;
 const pedido = await client.query(
@@ -229,14 +230,15 @@ const pedido = await client.query(
       [tenant_id, customer_id || null, subtotal, itbis, total, notas || null, req.user.operador_id || null]
     );
     const pedido_id = pedido.rows[0].id;
-    for (const item of items) {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      const item_itbis = s * (parseFloat(item.itbis_rate || 0) / 100);
+for (const item of items) {
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100));
+      const item_itbis = bruto - base;
       await client.query(
         `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [pedido_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario,
-         item.itbis_rate || 0, item_itbis, s, s + item_itbis]
+         item.itbis_rate || 0, item_itbis, base, bruto]
       );
     }
     await client.query('COMMIT');
@@ -261,11 +263,12 @@ router.put('/pedido/:id/editar', verifyToken, tenantGuard, async (req, res) => {
       [id, tenant_id]
     )
     if (!pedido.rows[0]) return res.status(404).json({ success: false, mensaje: 'Pedido no encontrado' })
-    let subtotal = 0, itbis_total = 0
+let subtotal = 0, itbis_total = 0
     items.forEach(item => {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
-      subtotal += s
-      itbis_total += s * (parseFloat(item.itbis_rate || 0) / 100)
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100))
+      subtotal += base
+      itbis_total += bruto - base
     })
     const total = subtotal + itbis_total
     await client.query(
@@ -273,12 +276,14 @@ router.put('/pedido/:id/editar', verifyToken, tenantGuard, async (req, res) => {
       [customer_id || null, subtotal, itbis_total, total, id]
     )
     await client.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [id])
-    for (const item of items) {
+for (const item of items) {
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario)
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100))
       await client.query(
-        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, subtotal)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario,
-         item.itbis_rate || 0, parseFloat(item.cantidad) * parseFloat(item.precio_unitario)]
+         item.itbis_rate || 0, bruto - base, base, bruto]
       )
     }
     await client.query('COMMIT')
@@ -434,11 +439,12 @@ router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
     const nueva_sec = seq.rows[0].secuencia_actual + 1;
     await client.query(`UPDATE ncf_sequences SET secuencia_actual=$1 WHERE id=$2`, [nueva_sec, seq.rows[0].id]);
     const nc_numero = `NC${String(nueva_sec).padStart(8,'0')}`;
-    let subtotal = 0, itbis = 0;
+let subtotal = 0, itbis = 0;
     for (const item of items) {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      subtotal += s;
-      itbis += s * (parseFloat(item.itbis_rate || 0) / 100);
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100));
+      subtotal += base;
+      itbis += bruto - base;
     }
     const total = subtotal + itbis;
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
@@ -449,14 +455,15 @@ router.post('/nota-credito', verifyToken, tenantGuard, async (req, res) => {
        motivo || `Nota de crédito por factura ${facturaOrig.rows[0].ncf}`, factura_id, numero_factura, req.user.operador_id || null]
     );
     const nota_id = nota.rows[0].id;
-    for (const item of items) {
-      const s = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      const item_itbis = s * (parseFloat(item.itbis_rate || 0) / 100);
+ for (const item of items) {
+      const bruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const base = bruto / (1 + (parseFloat(item.itbis_rate || 0) / 100));
+      const item_itbis = bruto - base;
       await client.query(
         `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [nota_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario,
-         item.itbis_rate || 0, item_itbis, s, s + item_itbis]
+         item.itbis_rate || 0, item_itbis, base, bruto]
       );
       if (item.product_id) {
         const inv = await client.query(
@@ -516,13 +523,13 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'La factura debe tener al menos un item' });
     }
     await client.query('BEGIN');
-    let subtotal = 0;
+  let subtotal = 0;
     let itbis = 0;
     for (const item of items) {
-      const item_subtotal = item.cantidad * item.precio_unitario;
-      const item_itbis = item_subtotal * (item.itbis_rate / 100);
-      subtotal += item_subtotal;
-      itbis += item_itbis;
+      const item_bruto = item.cantidad * item.precio_unitario;
+      const item_base = item_bruto / (1 + ((item.itbis_rate || 0) / 100));
+      subtotal += item_base;
+      itbis += item_bruto - item_base;
     }
 const total = subtotal + itbis;
     // Blindaje: no permitir facturas con valores negativos o en cero
@@ -591,14 +598,14 @@ const total = subtotal + itbis;
       [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null]
     );
     const invoice_id = invoice.rows[0].id;
-    for (const item of items) {
-      const item_subtotal = item.cantidad * item.precio_unitario;
-      const item_itbis = item_subtotal * (item.itbis_rate / 100);
-      const item_total = item_subtotal + item_itbis;
+for (const item of items) {
+      const item_bruto = item.cantidad * item.precio_unitario;
+      const item_base = item_bruto / (1 + ((item.itbis_rate || 0) / 100));
+      const item_itbis = item_bruto - item_base;
       await client.query(
         `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, item_subtotal, item_total]
+        [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, item_base, item_bruto]
       );
     }
     for (const item of items) {
@@ -1490,13 +1497,13 @@ router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'Debe agregar al menos un producto' });
     }
 
-    let subtotal = 0;
+let subtotal = 0;
     let itbis = 0;
     items.forEach(item => {
-      const itemSubtotal = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      const itemItbis = itemSubtotal * (parseFloat(item.itbis_rate || 18) / 100);
-      subtotal += itemSubtotal;
-      itbis += itemItbis;
+      const itemBruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const itemBase = itemBruto / (1 + (parseFloat(item.itbis_rate || 18) / 100));
+      subtotal += itemBase;
+      itbis += itemBruto - itemBase;
     });
     const total = subtotal + itbis;
 
@@ -1508,13 +1515,14 @@ router.post('/cotizacion', verifyToken, tenantGuard, async (req, res) => {
 
     const cotizacionId = cotizacion.rows[0].id;
 
-    for (const item of items) {
-      const itemSubtotal = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
-      const itemItbis = itemSubtotal * (parseFloat(item.itbis_rate || 18) / 100);
- await pool.query(
+for (const item of items) {
+      const itemBruto = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
+      const itemBase = itemBruto / (1 + (parseFloat(item.itbis_rate || 18) / 100));
+      const itemItbis = itemBruto - itemBase;
+      await pool.query(
         `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [cotizacionId, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, itemItbis, itemSubtotal, itemSubtotal + itemItbis]
+        [cotizacionId, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, itemItbis, itemBase, itemBruto]
       );
     }
 
