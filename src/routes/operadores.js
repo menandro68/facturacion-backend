@@ -352,32 +352,40 @@ const pedidos = await pool.query(`
       ORDER BY creado_en DESC
       LIMIT 200
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
-    // 7. Detalle - Lista de transacciones (facturas, pedidos, etc.)
+// 7. Detalle - Lista de transacciones: UNA FILA POR EVENTO
+    // (cotizacion, pedido, factura, NC, anulacion — aunque sea el mismo documento evolucionando)
     const detalleFacturas = await pool.query(`
-      SELECT
-        i.id,
-        i.ncf,
-        i.estado,
-        i.total,
-        i.creado_en,
-        c.nombre as cliente_nombre,
-    CASE
-          WHEN i.estado = 'emitida' AND i.origen = 'cotizacion' THEN 'Factura (de Cotizacion)'
-          WHEN i.estado = 'emitida' AND i.origen = 'pedido' THEN 'Factura (de Pedido)'
-          WHEN i.estado = 'emitida' THEN 'Factura'
-          WHEN i.estado = 'pedido' THEN 'Pedido'
-          WHEN i.estado = 'cotizacion' THEN 'Cotizacion'
-          WHEN i.estado = 'nota_credito' THEN 'Nota Credito'
-          WHEN i.estado = 'anulada' THEN 'Anulacion'
-          ELSE i.estado
-        END as tipo
-      FROM invoices i
-      LEFT JOIN customers c ON i.customer_id = c.id
-      WHERE i.tenant_id = $1
-       AND (i.operador_id = $2 OR i.anulado_por = $2 OR (i.operador_creador_id = $2 AND i.origen IN ('pedido', 'cotizacion')))
-        AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
-        AND ($4::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
-      ORDER BY i.creado_en DESC
+      SELECT * FROM (
+        SELECT i.id, i.ncf, 'cotizacion' as estado, i.total, i.creado_en, c.nombre as cliente_nombre, 'Cotizacion' as tipo
+        FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.tenant_id = $1
+          AND ((i.estado = 'cotizacion' AND i.operador_id = $2) OR (i.origen = 'cotizacion' AND i.operador_creador_id = $2))
+        UNION ALL
+        SELECT i.id, i.ncf, 'pedido' as estado, i.total, i.creado_en, c.nombre, 'Pedido'
+        FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.tenant_id = $1
+          AND ((i.estado = 'pedido' AND i.operador_id = $2) OR (i.origen = 'pedido' AND i.operador_creador_id = $2))
+        UNION ALL
+        SELECT i.id, i.ncf, i.estado, i.total, i.creado_en, c.nombre,
+          CASE
+            WHEN i.origen = 'cotizacion' THEN 'Factura (de Cotizacion)'
+            WHEN i.origen = 'pedido' THEN 'Factura (de Pedido)'
+            ELSE 'Factura'
+          END
+        FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.tenant_id = $1 AND i.operador_id = $2 AND i.estado IN ('emitida', 'pagada')
+        UNION ALL
+        SELECT i.id, i.ncf, i.estado, i.total, i.creado_en, c.nombre, 'Nota Credito'
+        FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.tenant_id = $1 AND i.operador_id = $2 AND i.estado = 'nota_credito'
+        UNION ALL
+        SELECT i.id, i.ncf, i.estado, i.total, COALESCE(i.anulado_en, i.creado_en) as creado_en, c.nombre, 'Anulacion'
+        FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+        WHERE i.tenant_id = $1 AND i.anulado_por = $2 AND i.estado = 'anulada'
+      ) t
+      WHERE ($3::date IS NULL OR (t.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (t.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+      ORDER BY creado_en DESC
       LIMIT 200
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
