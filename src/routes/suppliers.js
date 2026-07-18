@@ -39,12 +39,12 @@ router.get('/:id', verifyToken, tenantGuard, async (req, res) => {
 router.post('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, rnc, email, telefono, direccion, contacto } = req.body;
+    const { nombre, rnc, email, telefono, direccion, contacto, condiciones } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
     const result = await pool.query(
-      `INSERT INTO suppliers (tenant_id, nombre, rnc, email, telefono, direccion, contacto)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [tenant_id, nombre, rnc, email, telefono, direccion, contacto]
+      `INSERT INTO suppliers (tenant_id, nombre, rnc, email, telefono, direccion, contacto, condiciones)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [tenant_id, nombre, rnc, email, telefono, direccion, contacto, condiciones || '']
     );
     logActividad(req, 'proveedores', 'crear', `Creó proveedor ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -58,11 +58,11 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, rnc, email, telefono, direccion, contacto } = req.body;
+    const { nombre, rnc, email, telefono, direccion, contacto, condiciones } = req.body;
     const result = await pool.query(
-      `UPDATE suppliers SET nombre=$1, rnc=$2, email=$3, telefono=$4, direccion=$5, contacto=$6, actualizado_en=NOW()
-       WHERE id=$7 AND tenant_id=$8 RETURNING *`,
-      [nombre, rnc, email, telefono, direccion, contacto, id, tenant_id]
+      `UPDATE suppliers SET nombre=$1, rnc=$2, email=$3, telefono=$4, direccion=$5, contacto=$6, condiciones=$7, actualizado_en=NOW()
+       WHERE id=$8 AND tenant_id=$9 RETURNING *`,
+      [nombre, rnc, email, telefono, direccion, contacto, condiciones || '', id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Proveedor no encontrado' });
     logActividad(req, 'proveedores', 'editar', `Editó proveedor ${nombre}`, id);

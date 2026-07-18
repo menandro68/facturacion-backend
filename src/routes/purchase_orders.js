@@ -44,6 +44,32 @@ router.get('/', async (req, res) => {
   }
 })
 
+// GET Reporte 606 - Compras del mes con NCF (formato DGII)
+router.get('/reporte-606', async (req, res) => {
+  try {
+    const { mes, anio } = req.query
+    if (!mes || !anio) return res.status(400).json({ mensaje: 'Mes y año son requeridos' })
+    const result = await pool.query(`
+      SELECT po.id, po.numero, po.total, po.creado_en, po.factura_proveedor, po.ncf_proveedor,
+             po.fecha_vencimiento_pago, po.estado_pago, po.monto_pagado,
+             s.nombre as proveedor_nombre, s.rnc as proveedor_rnc
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
+      WHERE po.tenant_id = $1
+        AND po.estado = 'recibida'
+        AND EXTRACT(MONTH FROM po.creado_en AT TIME ZONE 'America/Santo_Domingo') = $2
+        AND EXTRACT(YEAR FROM po.creado_en AT TIME ZONE 'America/Santo_Domingo') = $3
+      ORDER BY po.creado_en ASC
+    `, [req.user.tenant_id, parseInt(mes), parseInt(anio)])
+
+    const conNcf = result.rows.filter(o => o.ncf_proveedor)
+    const sinNcf = result.rows.filter(o => !o.ncf_proveedor)
+    res.json({ data: { incluidas: conNcf, sin_ncf: sinNcf } })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
 // GET una orden con sus items
 router.get('/:id', async (req, res) => {
   try {
@@ -132,13 +158,13 @@ router.put('/:id/estado', async (req, res) => {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    const { estado } = req.body
+const { estado, factura_proveedor, ncf_proveedor } = req.body
     const tenant_id = req.user.tenant_id
     const id = req.params.id
 
     // Verificar estado anterior y obtener nombre del proveedor
     const ordenActual = await client.query(
-      `SELECT po.estado, s.nombre as proveedor_nombre
+      `SELECT po.estado, po.fecha_vencimiento_pago, s.nombre as proveedor_nombre, s.condiciones
        FROM purchase_orders po
        LEFT JOIN suppliers s ON po.supplier_id = s.id
        WHERE po.id=$1 AND po.tenant_id=$2`,
@@ -147,13 +173,35 @@ router.put('/:id/estado', async (req, res) => {
     if (!ordenActual.rows[0]) return res.status(404).json({ mensaje: 'Orden no encontrada' })
     const proveedorNombre = ordenActual.rows[0].proveedor_nombre || null
 
-    await client.query(
+  await client.query(
       'UPDATE purchase_orders SET estado=$1 WHERE id=$2 AND tenant_id=$3',
       [estado, id, tenant_id]
     )
 
+    // Guardar No. Factura y NCF del proveedor si vienen (al recibir la orden)
+    if (factura_proveedor || ncf_proveedor) {
+      await client.query(
+        'UPDATE purchase_orders SET factura_proveedor=COALESCE($1, factura_proveedor), ncf_proveedor=COALESCE($2, ncf_proveedor) WHERE id=$3 AND tenant_id=$4',
+        [factura_proveedor || null, ncf_proveedor || null, id, tenant_id]
+      )
+    }
+
     // Si se marca como recibida, actualizar inventario
     if (estado === 'recibida' && ordenActual.rows[0].estado !== 'recibida') {
+
+      // Calcular fecha de vencimiento automatica segun condiciones del proveedor (solo si no fue puesta manualmente)
+      if (!ordenActual.rows[0].fecha_vencimiento_pago) {
+        const condiciones = ordenActual.rows[0].condiciones || ''
+        const match = condiciones.match(/\d+/)
+        const dias = match ? parseInt(match[0]) : 0
+        await client.query(
+          `UPDATE purchase_orders
+           SET fecha_vencimiento_pago = ((NOW() AT TIME ZONE 'America/Santo_Domingo')::date + ($1 || ' days')::interval)::date
+           WHERE id=$2 AND tenant_id=$3`,
+          [dias, id, tenant_id]
+        )
+      }
+
       const items = await client.query(
         'SELECT * FROM purchase_order_items WHERE order_id=$1', [id]
       )

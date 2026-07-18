@@ -88,6 +88,37 @@ router.get('/clientes', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET - Reporte 607 - Ventas del mes con NCF (formato DGII)
+router.get('/reporte-607', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { mes, anio } = req.query;
+    if (!mes || !anio) return res.status(400).json({ success: false, mensaje: 'Mes y año son requeridos' });
+
+    const result = await pool.query(
+      `SELECT i.id, i.ncf, i.estado, i.subtotal, i.itbis, i.total, i.fecha_emision, i.creado_en,
+              i.numero_factura,
+              c.nombre as cliente_nombre, c.rnc_cedula,
+              fm.ncf as ncf_modificado
+       FROM invoices i
+       LEFT JOIN customers c ON i.customer_id = c.id
+       LEFT JOIN invoices fm ON i.referencia_id = fm.id
+       WHERE i.tenant_id = $1
+       AND i.estado IN ('emitida', 'pagada', 'anulada', 'nota_credito')
+       AND EXTRACT(MONTH FROM COALESCE(i.fecha_emision, i.creado_en) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = $2
+       AND EXTRACT(YEAR FROM COALESCE(i.fecha_emision, i.creado_en) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = $3
+       ORDER BY COALESCE(i.fecha_emision, i.creado_en) ASC`,
+      [tenant_id, parseInt(mes), parseInt(anio)]
+    );
+
+    const incluidas = result.rows.filter(f => f.ncf);
+    const sin_ncf = result.rows.filter(f => !f.ncf && f.estado !== 'anulada');
+    res.json({ success: true, data: { incluidas, sin_ncf } });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // GET - Dashboard resumen del día y mes
 router.get('/dashboard', verifyToken, tenantGuard, async (req, res) => {
   try {

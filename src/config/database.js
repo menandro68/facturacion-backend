@@ -201,11 +201,13 @@ const createTables = async () => {
         telefono VARCHAR(20),
         direccion TEXT,
         contacto VARCHAR(100),
+        condiciones VARCHAR(30) DEFAULT '',
         estado VARCHAR(20) DEFAULT 'activo',
         creado_en TIMESTAMP DEFAULT NOW(),
         actualizado_en TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(30) DEFAULT ''`);
     console.log('✅ Tabla suppliers creada');
 
     // 12. Tabla inventario
@@ -348,10 +350,12 @@ const createTables = async () => {
         creado_en TIMESTAMP DEFAULT NOW()
       )
     `);
-    await pool.query(`
+  await pool.query(`
       ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS monto_pagado DECIMAL(12,2) DEFAULT 0;
       ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS estado_pago VARCHAR(20) DEFAULT 'pendiente';
       ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS fecha_vencimiento_pago DATE;
+      ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS factura_proveedor VARCHAR(50);
+      ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS ncf_proveedor VARCHAR(20);
     `);
     console.log('✅ Tabla purchase_orders creada');
 
