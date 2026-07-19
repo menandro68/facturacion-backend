@@ -58,6 +58,36 @@ const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(12,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE conduces_items ADD COLUMN IF NOT EXISTS itbis_rate NUMERIC(5,2) DEFAULT 0`);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conduces_nc (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        conduce_id UUID NOT NULL,
+        numero_nc INTEGER,
+        numero VARCHAR(20),
+        customer_id UUID,
+        cliente_nombre VARCHAR(255),
+        motivo TEXT,
+        total NUMERIC(12,2) DEFAULT 0,
+        estado VARCHAR(20) DEFAULT 'emitida',
+        operador_id UUID,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla conduces_nc lista');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conduces_nc_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nc_id UUID NOT NULL,
+        product_id UUID,
+        descripcion VARCHAR(255),
+        cantidad NUMERIC(12,2) DEFAULT 1,
+        precio_unitario NUMERIC(12,2) DEFAULT 0,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Tabla conduces_nc_items lista');
+
     console.log('✅ Tablas conduces verificadas/reparadas');
   } catch (e) {
     console.error('Error creando/reparando tablas conduces:', e.message);
@@ -79,6 +109,25 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
        LEFT JOIN choferes ch ON c.chofer_id = ch.id
        WHERE c.tenant_id = $1
        ORDER BY c.creado_en DESC`,
+      [tenant_id]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// ==========================================
+// GET - Lista de Notas de Credito de conduces
+// (DEBE ir ANTES de GET /:id para que Express no confunda "nc" con un id)
+// ==========================================
+router.get('/nc/lista', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const result = await pool.query(
+      `SELECT n.*, c.numero as conduce_numero FROM conduces_nc n
+       LEFT JOIN conduces c ON n.conduce_id = c.id
+       WHERE n.tenant_id = $1 ORDER BY n.creado_en DESC`,
       [tenant_id]
     );
     res.json({ success: true, data: result.rows });
@@ -494,5 +543,170 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     if (!res.headersSent) res.status(500).json({ success: false, mensaje: error.message });
   }
 });
+
+// POST - Crear Nota de Credito de un conduce (sin valor fiscal)
+router.post('/:id/nota-credito', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const { motivo, items } = req.body;
+
+    if (!items || !items.length) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'Agregue al menos un articulo' }); }
+
+    const conduce = await client.query(`SELECT * FROM conduces WHERE id = $1 AND tenant_id = $2`, [id, tenant_id]);
+    if (!conduce.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' }); }
+    if (conduce.rows[0].estado === 'anulado') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede hacer NC a un conduce anulado' }); }
+    if (conduce.rows[0].facturado) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'Este conduce fue convertido en factura. Haga la NC a la factura.' }); }
+
+    // Validar cantidades contra el conduce (menos NC previas)
+    const itemsConduce = await client.query(`SELECT * FROM conduces_items WHERE conduce_id = $1`, [id]);
+    const ncPrevias = await client.query(
+      `SELECT ni.product_id, ni.descripcion, COALESCE(SUM(ni.cantidad),0) as cant_nc
+       FROM conduces_nc_items ni JOIN conduces_nc n ON ni.nc_id = n.id
+       WHERE n.conduce_id = $1 AND n.estado = 'emitida' GROUP BY ni.product_id, ni.descripcion`,
+      [id]
+    );
+    for (const item of items) {
+      const orig = itemsConduce.rows.find(ic => (ic.product_id && ic.product_id === item.product_id) || ic.descripcion === item.descripcion);
+      if (!orig) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: `El articulo "${item.descripcion}" no pertenece a este conduce` }); }
+      const previa = ncPrevias.rows.find(np => (np.product_id && np.product_id === item.product_id) || np.descripcion === item.descripcion);
+      const disponible = parseFloat(orig.cantidad) - parseFloat(previa?.cant_nc || 0);
+      if (parseFloat(item.cantidad) > disponible) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, mensaje: `La cantidad de "${item.descripcion}" excede lo disponible (${disponible})` });
+      }
+    }
+
+    // Numero correlativo NCC-XXXX
+    const maxNum = await client.query(`SELECT COALESCE(MAX(numero_nc), 0) + 1 AS siguiente FROM conduces_nc WHERE tenant_id = $1`, [tenant_id]);
+    const numeroNc = parseInt(maxNum.rows[0].siguiente);
+    const numeroTextoNc = 'NCC-' + String(numeroNc).padStart(4, '0');
+
+    // Total de la NC
+    let totalNc = 0;
+    for (const item of items) totalNc += parseFloat(item.cantidad) * parseFloat(item.precio_unitario || 0);
+
+    const nc = await client.query(
+      `INSERT INTO conduces_nc (tenant_id, conduce_id, numero_nc, numero, customer_id, cliente_nombre, motivo, total, estado, operador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'emitida', $9) RETURNING *`,
+      [tenant_id, id, numeroNc, numeroTextoNc, conduce.rows[0].customer_id, conduce.rows[0].cliente_nombre,
+       motivo || `Nota de credito por conduce ${conduce.rows[0].numero}`, totalNc, req.user.operador_id || null]
+    );
+    const ncId = nc.rows[0].id;
+
+    // Items + devolver inventario (tabla inventory, igual que el conduce pero en entrada)
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO conduces_nc_items (nc_id, product_id, descripcion, cantidad, precio_unitario)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [ncId, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario || 0]
+      );
+      if (item.product_id) {
+        const inv = await client.query(
+          'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
+          [item.product_id, tenant_id]
+        );
+        if (inv.rows.length > 0) {
+          const stockActual = parseFloat(inv.rows[0].stock_actual);
+          const cantidad = parseFloat(item.cantidad);
+          const stockNuevo = stockActual + cantidad;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
+            [stockNuevo, inv.rows[0].id]);
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
+            [tenant_id, inv.rows[0].id, cantidad, stockActual, stockNuevo, `NC Conduce ${numeroTextoNc} (${conduce.rows[0].numero})`]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, data: nc.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET - Impresion de Nota de Credito de conduce (HTML imprimible)
+router.get('/nc/:id/pdf', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { token } = req.query
+    if (!token) return res.status(401).json({ mensaje: 'Token requerido' })
+
+    const jwt = require('jsonwebtoken')
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const tenant_id = decoded.tenant_id
+
+    const result = await pool.query(
+      `SELECT n.*, c.numero as conduce_numero,
+              t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.telefono as empresa_tel, t.direccion as empresa_dir
+       FROM conduces_nc n
+       LEFT JOIN conduces c ON n.conduce_id = c.id
+       LEFT JOIN tenants t ON n.tenant_id = t.id
+       WHERE n.id = $1 AND n.tenant_id = $2`,
+      [id, tenant_id]
+    )
+    if (!result.rows[0]) return res.status(404).json({ mensaje: 'Nota de credito no encontrada' })
+    const n = result.rows[0]
+    const itemsQ = await pool.query(`SELECT * FROM conduces_nc_items WHERE nc_id = $1`, [id])
+
+    const filasItems = itemsQ.rows.map(it => `
+      <tr>
+        <td>${it.descripcion}</td>
+        <td style="text-align:right">${parseFloat(it.cantidad).toLocaleString('es-DO')}</td>
+        <td style="text-align:right">RD$${parseFloat(it.precio_unitario).toLocaleString('es-DO',{minimumFractionDigits:2})}</td>
+        <td style="text-align:right">RD$${(parseFloat(it.cantidad) * parseFloat(it.precio_unitario)).toLocaleString('es-DO',{minimumFractionDigits:2})}</td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Nota de Credito ${n.numero}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:30px;color:#1e293b;max-width:600px;margin:0 auto}
+      .header{text-align:center;border-bottom:2px solid #b91c1c;padding-bottom:16px;margin-bottom:16px}
+      .empresa{font-size:18px;font-weight:bold;color:#1e40af}
+      .titulo{font-size:15px;color:#b91c1c;margin-top:4px;font-weight:bold}
+      .fila{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:13px}
+      .label{color:#64748b}
+      .valor{font-weight:500}
+      table{width:100%;border-collapse:collapse;font-size:13px;margin:16px 0}
+      th{background:#b91c1c;color:white;padding:8px;text-align:left}
+      th:nth-child(2),th:nth-child(3),th:nth-child(4){text-align:right}
+      td{padding:7px 8px;border-bottom:1px solid #e2e8f0}
+      .total{font-size:18px;font-weight:bold;color:#b91c1c;text-align:right;margin-top:16px}
+      .footer{text-align:center;margin-top:20px;font-size:11px;color:#94a3b8}
+      @media print{button{display:none}}
+    </style></head><body>
+    <div class="header">
+      <div class="empresa">${n.empresa_nombre || 'Sistema de Facturación'}</div>
+      <div class="titulo">NOTA DE CRÉDITO ${n.numero}</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px">Documento sin valor fiscal</div>
+      ${n.empresa_rnc ? `<div style="font-size:12px;color:#64748b">RNC: ${n.empresa_rnc}</div>` : ''}
+      ${n.empresa_tel ? `<div style="font-size:12px;color:#64748b">Tel: ${n.empresa_tel}</div>` : ''}
+    </div>
+    <div class="fila"><span class="label">Fecha:</span><span class="valor">${new Date(n.creado_en).toLocaleDateString('es-DO')}</span></div>
+    <div class="fila"><span class="label">Conduce Original:</span><span class="valor">${n.conduce_numero || '-'}</span></div>
+    <div class="fila"><span class="label">Cliente:</span><span class="valor">${n.cliente_nombre || 'Consumidor Final'}</span></div>
+    ${n.motivo ? `<div class="fila"><span class="label">Motivo:</span><span class="valor">${n.motivo}</span></div>` : ''}
+    <table>
+      <thead><tr><th>Descripción</th><th>Cantidad</th><th>Precio</th><th>Importe</th></tr></thead>
+      <tbody>${filasItems}</tbody>
+    </table>
+    <div class="total">Total NC: RD$${parseFloat(n.total).toLocaleString('es-DO',{minimumFractionDigits:2})}</div>
+    <div class="footer">Documento interno sin valor fiscal</div>
+    <script>window.onload=()=>window.print()</script>
+    </body></html>`
+
+    res.send(html)
+  } catch (error) {
+    res.status(500).json({ mensaje: error.message })
+  }
+})
 
 module.exports = router;

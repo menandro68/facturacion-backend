@@ -6,6 +6,8 @@ const tenantGuard = require('../middleware/tenantGuard')
 
 router.use(verifyToken, tenantGuard)
 
+pool.query(`ALTER TABLE devoluciones ADD COLUMN IF NOT EXISTS conduce_id UUID`).catch(() => {})
+
 // GET todas las devoluciones
 router.get('/', async (req, res) => {
   try {
@@ -48,11 +50,11 @@ router.get('/:id', async (req, res) => {
 
 // POST crear devolucion (almacen registra)
 router.post('/', async (req, res) => {
-  const { factura_id, factura_ncf, customer_id, cliente_nombre, motivo, items, creado_por } = req.body
+  const { factura_id, conduce_id, factura_ncf, customer_id, cliente_nombre, motivo, items, creado_por } = req.body
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    if (!factura_id) {
+    if (!factura_id && !conduce_id) {
       await client.query('ROLLBACK')
       return res.status(400).json({ mensaje: 'La devolucion debe estar asociada a una factura' })
     }
@@ -79,9 +81,9 @@ router.post('/', async (req, res) => {
 
     // Insertar devolucion
 const dev = await client.query(`
-      INSERT INTO devoluciones (tenant_id, numero, factura_id, factura_ncf, customer_id, cliente_nombre, motivo, estado, subtotal, itbis, total, creado_por, operador_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8, $9, $10, $11, $12) RETURNING *
-    `, [req.user.tenant_id, numero, factura_id, factura_ncf || null, customer_id || null, cliente_nombre || null, motivo || '', subtotal, itbis, total, creado_por || null, req.user.operador_id || null])
+      INSERT INTO devoluciones (tenant_id, numero, factura_id, factura_ncf, customer_id, cliente_nombre, motivo, estado, subtotal, itbis, total, creado_por, operador_id, conduce_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pendiente', $8, $9, $10, $11, $12, $13) RETURNING *
+    `, [req.user.tenant_id, numero, factura_id || null, factura_ncf || null, customer_id || null, cliente_nombre || null, motivo || '', subtotal, itbis, total, creado_por || null, req.user.operador_id || null, conduce_id || null])
 
     // Insertar items
     for (const item of items) {
@@ -203,6 +205,55 @@ router.put('/:id/procesar', async (req, res) => {
     const d = dev.rows[0]
     const items = await client.query('SELECT * FROM devoluciones_items WHERE devolucion_id = $1', [id])
 
+    // ===== DEVOLUCION DE CONDUCE (genera NCC, sin valor fiscal) =====
+    if (d.conduce_id) {
+      const conduceDev = await client.query(`SELECT * FROM conduces WHERE id = $1 AND tenant_id = $2`, [d.conduce_id, tenant_id])
+      if (!conduceDev.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ mensaje: 'Conduce no encontrado' }) }
+
+      const maxNumCd = await client.query(`SELECT COALESCE(MAX(numero_nc), 0) + 1 AS siguiente FROM conduces_nc WHERE tenant_id = $1`, [tenant_id])
+      const numeroNcCd = parseInt(maxNumCd.rows[0].siguiente)
+      const numeroTextoNcCd = 'NCC-' + String(numeroNcCd).padStart(4, '0')
+
+      const ncCd = await client.query(
+        `INSERT INTO conduces_nc (tenant_id, conduce_id, numero_nc, numero, customer_id, cliente_nombre, motivo, total, estado, operador_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'emitida',$9) RETURNING *`,
+        [tenant_id, d.conduce_id, numeroNcCd, numeroTextoNcCd, d.customer_id, d.cliente_nombre,
+         `Nota de credito generada desde devolucion ${d.numero}. Conduce original: ${conduceDev.rows[0].numero}. Motivo: ${d.motivo}`, d.total, req.user.operador_id || null]
+      )
+      const ncIdCd = ncCd.rows[0].id
+
+      for (const it of items.rows) {
+        await client.query(
+          `INSERT INTO conduces_nc_items (nc_id, product_id, descripcion, cantidad, precio_unitario)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [ncIdCd, it.product_id || null, it.descripcion, it.cantidad, it.precio_unitario || 0]
+        )
+        if (it.product_id) {
+          const invCd = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [it.product_id, tenant_id])
+          if (invCd.rows.length > 0) {
+            const stockActualCd = parseFloat(invCd.rows[0].stock_actual)
+            const cantidadCd = parseFloat(it.cantidad)
+            const stockNuevoCd = stockActualCd + cantidadCd
+            await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoCd, invCd.rows[0].id])
+            await client.query(
+              `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+               VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
+              [tenant_id, invCd.rows[0].id, cantidadCd, stockActualCd, stockNuevoCd, `NC Conduce ${numeroTextoNcCd} (devolucion ${d.numero})`]
+            )
+          }
+        }
+      }
+
+  await client.query(
+        `UPDATE devoluciones SET estado = 'procesada', procesada_por = $1, procesada_en = NOW() WHERE id = $2 AND tenant_id = $3`,
+        [procesada_por || null, id, tenant_id]
+      )
+
+      await client.query('COMMIT')
+      return res.json({ success: true, mensaje: `Devolucion procesada. Nota de credito ${numeroTextoNcCd} generada`, data: ncCd.rows[0] })
+    }
+    // ===== FIN DEVOLUCION DE CONDUCE =====
+
 // Generar NCF usando la secuencia NC (misma que las notas de credito directas)
     let ncfNC = null
     let seq = await client.query(
@@ -313,7 +364,6 @@ router.put('/:id/cancelar', async (req, res) => {
     await client.query('COMMIT')
     res.json({ mensaje: 'Devolucion cancelada' })
   } catch (err) {
-    await client.query('ROLLBACK')
     res.status(500).json({ mensaje: err.message })
   } finally {
     client.release()
