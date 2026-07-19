@@ -88,28 +88,56 @@ router.get('/reporte/productos', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { fecha_inicio, fecha_fin, vendedor_id, customer_id, producto } = req.query;
-    const result = await pool.query(`
-SELECT 
-        ii.descripcion,
-        SUM(ii.cantidad * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_cantidad,
-        ii.precio_unitario,
-        SUM(ii.subtotal * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_subtotal,
-        SUM(ii.itbis_monto * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_itbis,
-        SUM(ii.total * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_venta,
-        COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0) * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END), 0) as total_costo,
-        SUM(ii.subtotal * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) - COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0) * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END), 0) as beneficio
-      FROM invoices i
-      LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
-      LEFT JOIN products p ON p.id = ii.product_id
-      LEFT JOIN customers c ON c.id = i.customer_id
-WHERE i.tenant_id = $1
-   AND i.estado IN ('emitida', 'pagada', 'nota_credito')
-        AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
-        AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
-        AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
-        AND ($5::uuid IS NULL OR i.customer_id = $5::uuid)
-        AND ($6::text IS NULL OR ii.descripcion ILIKE $6::text)
-      GROUP BY ii.descripcion, ii.precio_unitario
+const result = await pool.query(`
+      SELECT descripcion, SUM(total_cantidad) as total_cantidad, precio_unitario,
+             SUM(total_subtotal) as total_subtotal, SUM(total_itbis) as total_itbis,
+             SUM(total_venta) as total_venta, SUM(total_costo) as total_costo,
+             SUM(total_subtotal) - SUM(total_costo) as beneficio
+      FROM (
+        SELECT 
+          ii.descripcion,
+          SUM(ii.cantidad * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_cantidad,
+          ii.precio_unitario,
+          SUM(ii.subtotal * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_subtotal,
+          SUM(ii.itbis_monto * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_itbis,
+          SUM(ii.total * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END) as total_venta,
+          COALESCE(SUM(ii.cantidad * COALESCE(p.costo, 0) * CASE WHEN i.estado = 'nota_credito' THEN -1 ELSE 1 END), 0) as total_costo
+        FROM invoices i
+        LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
+        LEFT JOIN products p ON p.id = ii.product_id
+        LEFT JOIN customers c ON c.id = i.customer_id
+        WHERE i.tenant_id = $1
+          AND i.estado IN ('emitida', 'pagada', 'nota_credito')
+          AND ($2::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+          AND ($3::date IS NULL OR (i.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
+          AND ($4::uuid IS NULL OR c.vendedor_id = $4::uuid)
+          AND ($5::uuid IS NULL OR i.customer_id = $5::uuid)
+          AND ($6::text IS NULL OR ii.descripcion ILIKE $6::text)
+        GROUP BY ii.descripcion, ii.precio_unitario
+        UNION ALL
+        SELECT 
+          ci.descripcion,
+          SUM(ci.cantidad) as total_cantidad,
+          ci.precio_unitario,
+          SUM(ci.cantidad * ci.precio_unitario) as total_subtotal,
+          0 as total_itbis,
+          SUM(ci.cantidad * ci.precio_unitario) as total_venta,
+          COALESCE(SUM(ci.cantidad * COALESCE(p2.costo, 0)), 0) as total_costo
+        FROM conduces cd
+        JOIN conduces_items ci ON ci.conduce_id = cd.id
+        LEFT JOIN products p2 ON p2.id = ci.product_id
+        LEFT JOIN customers c2 ON c2.id = cd.customer_id
+        WHERE cd.tenant_id = $1
+          AND cd.estado = 'emitido'
+          AND COALESCE(cd.facturado, false) = false
+          AND ($2::date IS NULL OR (cd.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $2::date)
+          AND ($3::date IS NULL OR (cd.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $3::date)
+          AND ($4::uuid IS NULL OR c2.vendedor_id = $4::uuid)
+          AND ($5::uuid IS NULL OR cd.customer_id = $5::uuid)
+          AND ($6::text IS NULL OR ci.descripcion ILIKE $6::text)
+        GROUP BY ci.descripcion, ci.precio_unitario
+      ) unido
+      GROUP BY descripcion, precio_unitario
       ORDER BY total_venta DESC
     `, [tenant_id, fecha_inicio || null, fecha_fin || null, vendedor_id || null, customer_id || null, producto ? `%${producto}%` : null]);
     res.json({ success: true, data: result.rows });

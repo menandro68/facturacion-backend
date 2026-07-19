@@ -184,8 +184,10 @@ const createTables = async () => {
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS estado VARCHAR(20) DEFAULT 'confirmado';
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS vendedor_nombre VARCHAR(150);
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmado_en TIMESTAMP;
-      ALTER TABLE payments ADD COLUMN IF NOT EXISTS operador_id UUID;
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS operador_id UUID;
       ALTER TABLE payments ADD COLUMN IF NOT EXISTS confirmado_por UUID;
+      ALTER TABLE payments ADD COLUMN IF NOT EXISTS conduce_id UUID REFERENCES conduces(id);
+      ALTER TABLE payments ALTER COLUMN invoice_id DROP NOT NULL;
     `);
     console.log('✅ Tabla payments creada');
     console.log('Columna operador_id agregada a payments');

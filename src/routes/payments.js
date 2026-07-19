@@ -9,10 +9,12 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const result = await pool.query(
-      `SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre
+  `SELECT p.*, COALESCE(i.ncf, cd.numero) as ncf, COALESCE(i.total, cd.total) as invoice_total, COALESCE(c.nombre, cc.nombre) as cliente_nombre
        FROM payments p
-       JOIN invoices i ON p.invoice_id = i.id
+       LEFT JOIN invoices i ON p.invoice_id = i.id
        LEFT JOIN customers c ON i.customer_id = c.id
+       LEFT JOIN conduces cd ON p.conduce_id = cd.id
+       LEFT JOIN customers cc ON cd.customer_id = cc.id
        WHERE p.tenant_id = $1
        ORDER BY p.creado_en DESC`,
       [tenant_id]
@@ -43,14 +45,42 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
   try {
     const { tenant_id } = req.user;
-    const { invoice_id, monto, metodo, referencia, notas } = req.body;
+const { invoice_id, conduce_id, monto, metodo, referencia, notas } = req.body;
     const vendedor_nombre = req.user?.nombre || null;
     const estado_pago = req.user?.rol === 'vendedor' ? 'pendiente' : 'confirmado';
 
-    if (!invoice_id) return res.status(400).json({ success: false, mensaje: 'invoice_id es requerido' });
+    if (!invoice_id && !conduce_id) return res.status(400).json({ success: false, mensaje: 'invoice_id o conduce_id es requerido' });
     if (!monto) return res.status(400).json({ success: false, mensaje: 'El monto es requerido' });
 
     await client.query('BEGIN');
+
+    // ===== PAGO A CONDUCE (venta sin valor fiscal) =====
+    if (conduce_id) {
+      const conduce = await client.query(
+        `SELECT * FROM conduces WHERE id = $1 AND tenant_id = $2`,
+        [conduce_id, tenant_id]
+      );
+      if (!conduce.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' }); }
+      if (conduce.rows[0].estado === 'anulado') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede pagar un conduce anulado' }); }
+
+      const paymentCd = await client.query(
+        `INSERT INTO payments (tenant_id, conduce_id, monto, metodo, referencia, notas, vendedor_nombre, estado, operador_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [tenant_id, conduce_id, monto, metodo || 'efectivo', referencia || null, notas || null, vendedor_nombre, estado_pago, req.user.operador_id || null]
+      );
+      const pagosCd = await client.query(
+        `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE conduce_id = $1 AND estado = 'confirmado'`,
+        [conduce_id]
+      );
+      await client.query('COMMIT');
+      return res.status(201).json({
+        success: true,
+        data: paymentCd.rows[0],
+        total_pagado: parseFloat(pagosCd.rows[0].total_pagado),
+        total_factura: parseFloat(conduce.rows[0].total)
+      });
+    }
+    // ===== FIN PAGO A CONDUCE =====
 
     // Verificar que la factura existe y está emitida
     const invoice = await client.query(
@@ -161,11 +191,14 @@ router.get('/:id/recibo', async (req, res) => {
     const tenant_id = decoded.tenant_id
 
     const result = await pool.query(
-      `SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre, c.rnc_cedula,
+      `SELECT p.*, COALESCE(i.ncf, cd.numero) as ncf, COALESCE(i.total, cd.total) as invoice_total,
+              COALESCE(c.nombre, cd.cliente_nombre, cc.nombre) as cliente_nombre, COALESCE(c.rnc_cedula, cc.rnc_cedula) as rnc_cedula,
               t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.telefono as empresa_tel, t.direccion as empresa_dir
        FROM payments p
-       JOIN invoices i ON p.invoice_id = i.id
+       LEFT JOIN invoices i ON p.invoice_id = i.id
        LEFT JOIN customers c ON i.customer_id = c.id
+       LEFT JOIN conduces cd ON p.conduce_id = cd.id
+       LEFT JOIN customers cc ON cd.customer_id = cc.id
        LEFT JOIN tenants t ON p.tenant_id = t.id
        WHERE p.id = $1 AND p.tenant_id = $2`,
       [id, tenant_id]
