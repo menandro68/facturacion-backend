@@ -495,6 +495,42 @@ let subtotal = 0, itbis = 0;
   }
 });
 
+// GET cantidades ya devueltas por producto en devoluciones de una factura
+router.get('/:id/devuelto-dev', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT di.product_id, di.descripcion, SUM(di.cantidad) as cantidad_devuelta
+      FROM devoluciones_items di
+      JOIN devoluciones d ON di.devolucion_id = d.id
+      WHERE d.factura_id = $1
+        AND d.tenant_id = $2
+        AND d.estado != 'cancelada'
+      GROUP BY di.product_id, di.descripcion
+    `, [req.params.id, req.user.tenant_id])
+    res.json({ data: result.rows })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
+// GET cantidades ya devueltas por producto en notas de credito de una factura
+router.get('/:id/devuelto', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT ii.product_id, ii.descripcion, SUM(ii.cantidad) as cantidad_devuelta
+      FROM invoice_items ii
+      JOIN invoices nc ON ii.invoice_id = nc.id
+      WHERE nc.referencia_id = $1
+        AND nc.tenant_id = $2
+        AND nc.estado = 'nota_credito'
+      GROUP BY ii.product_id, ii.descripcion
+    `, [req.params.id, req.user.tenant_id])
+    res.json({ data: result.rows })
+  } catch (err) {
+    res.status(500).json({ mensaje: err.message })
+  }
+})
+
 router.get('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
