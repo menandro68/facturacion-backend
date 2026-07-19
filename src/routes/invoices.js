@@ -943,6 +943,23 @@ y += 4;
 // PDF MEDIA CARTA - PROFESIONAL: Carta estandar 612x792 con factura en mitad superior
 // Soporta MULTIPLES PAGINAS: cuando los items sobrepasan la mitad superior, salta a nueva pagina
 // Totales SOLO en la ultima pagina. Linea de corte en cada pagina.
+// GET pagina de impresion automatica (abre dialogo de imprimir y se cierra sola)
+router.get('/:id/print', (req, res) => {
+  const id = encodeURIComponent(req.params.id)
+  const token = encodeURIComponent(req.query.token || '')
+  res.send(`<!DOCTYPE html><html><head><title>Imprimiendo...</title></head>
+  <body style="margin:0">
+  <iframe id="pdfFrame" src="/invoices/${id}/pdf?token=${token}" style="border:0;width:100vw;height:100vh"></iframe>
+  <script>
+    var f = document.getElementById('pdfFrame')
+    window.addEventListener('load', function() { setTimeout(function() { try { f.contentWindow.print() } catch(e) {} }, 800) })
+    var armado = false
+    setTimeout(function() { armado = true }, 2000)
+    window.addEventListener('focus', function() { if (armado) setTimeout(function() { window.close() }, 500) })
+  </script>
+  </body></html>`)
+})
+
 router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
