@@ -23,6 +23,7 @@ const devolucionesRoutes = require('./routes/devoluciones');
 const conducesRoutes = require('./routes/conduces');
 const operadoresRoutes = require('./routes/operadores');
 const superAdminRoutes = require('./routes/superAdmin');
+const posRoutes = require('./routes/pos');
 
 const app = express();
 app.set('trust proxy', 1)
@@ -64,6 +65,7 @@ app.use('/payments', paymentRoutes);
 app.use('/reports', reportRoutes);
 app.use('/suppliers', supplierRoutes);
 app.use('/inventory', inventoryRoutes);
+app.use('/pos', posRoutes);
 app.use('/accounts-receivable', arRoutes);
 app.use('/accounts-payable', apRoutes);
 app.use('/mantenimiento', mantenimientoRoutes);
