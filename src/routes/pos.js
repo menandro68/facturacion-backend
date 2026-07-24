@@ -188,4 +188,38 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET /pos/consulta-rnc/:rnc - Consultar RNC/Cédula en el padrón LOCAL de la DGII
+router.get('/consulta-rnc/:rnc', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const rnc = String(req.params.rnc || '').replace(/\D/g, '');
+    if (rnc.length !== 9 && rnc.length !== 11) {
+      return res.status(400).json({ success: false, mensaje: 'El RNC debe tener 9 dígitos o la cédula 11 dígitos' });
+    }
+
+    const result = await pool.query(
+      `SELECT rnc, nombre, nombre_comercial, estado FROM padron_rnc WHERE rnc = $1 LIMIT 1`,
+      [rnc]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, data: null, mensaje: 'RNC no encontrado en el padrón de la DGII' });
+    }
+
+    const c = result.rows[0];
+    res.json({
+      success: true,
+      data: {
+        rnc: c.rnc,
+        nombre: c.nombre || '',
+        nombre_comercial: c.nombre_comercial || '',
+        estado: c.estado || '',
+        categoria: ''
+      }
+    });
+  } catch (err) {
+    console.error('Error consultando padrón RNC:', err.message);
+    res.status(500).json({ success: false, mensaje: 'Error consultando el padrón' });
+  }
+});
+
 module.exports = router;
