@@ -349,7 +349,7 @@ const loginEmpresa = async (req, res) => {
     }
     // 1. Buscar admin en users DENTRO de esa empresa
     const resultUser = await pool.query(
-      `SELECT u.*, t.nombre as empresa FROM users u
+      `SELECT u.*, t.nombre as empresa, t.features FROM users u
        JOIN tenants t ON u.tenant_id = t.id
        WHERE u.email = $1 AND u.tenant_id = $2`,
       [login_input, empresa_id]
@@ -370,12 +370,12 @@ const loginEmpresa = async (req, res) => {
         mensaje: 'Login exitoso',
         token,
         requiere_cambio: user.primer_login === true,
-        usuario: { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, empresa: user.empresa, primer_login: user.primer_login === true }
+        usuario: { id: user.id, nombre: user.nombre, email: user.email, rol: user.rol, empresa: user.empresa, features: user.features || {}, primer_login: user.primer_login === true }
       });
     }
     // 2. Buscar operador DENTRO de esa empresa
     const resultOperador = await pool.query(
-      `SELECT o.*, t.nombre as empresa FROM operadores o
+      `SELECT o.*, t.nombre as empresa, t.features FROM operadores o
        JOIN tenants t ON o.tenant_id = t.id
        WHERE o.username = $1 AND o.tenant_id = $2 AND o.activo = true`,
       [(usuario || email || '').toLowerCase().trim(), empresa_id]
@@ -397,7 +397,7 @@ const loginEmpresa = async (req, res) => {
         success: true,
         mensaje: 'Login exitoso',
         token,
-        usuario: { id: operador.id, nombre: operador.nombre, rol: 'operador', empresa: operador.empresa, modulos_permitidos: modulosPermitidos }
+        usuario: { id: operador.id, nombre: operador.nombre, rol: 'operador', empresa: operador.empresa, features: operador.features || {}, modulos_permitidos: modulosPermitidos }
       });
     }
     return res.status(401).json({ success: false, mensaje: 'Credenciales incorrectas para esta empresa' });
@@ -407,4 +407,18 @@ const loginEmpresa = async (req, res) => {
   }
 };
 
-module.exports = { register, login, cambiarCredenciales, listarEmpresasSelector, loginEmpresa };
+// ── Features del tenant en tiempo real (para feature flags frescos sin depender del login) ──
+const obtenerFeatures = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT features FROM tenants WHERE id = $1`,
+      [req.user.tenant_id]
+    );
+    res.json({ success: true, features: result.rows[0]?.features || {} });
+  } catch (error) {
+    console.error('Error al obtener features:', error.message);
+    res.status(500).json({ success: false, mensaje: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { register, login, cambiarCredenciales, listarEmpresasSelector, loginEmpresa, obtenerFeatures };
