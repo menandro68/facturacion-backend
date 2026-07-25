@@ -188,6 +188,24 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET /pos/caja/historial - Historial de cajas cerradas del tenant
+router.get('/caja/historial', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const result = await pool.query(
+      `SELECT * FROM cajas
+       WHERE tenant_id = $1 AND estado = 'cerrada'
+       ORDER BY fecha_cierre DESC
+       LIMIT 50`,
+      [tenant_id]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('Error consultando historial de cajas:', err);
+    res.status(500).json({ success: false, mensaje: 'Error consultando historial de cajas' });
+  }
+});
+
 // GET /pos/consulta-rnc/:rnc - Consultar RNC/Cédula en el padrón LOCAL de la DGII
 router.get('/consulta-rnc/:rnc', verifyToken, tenantGuard, async (req, res) => {
   try {
