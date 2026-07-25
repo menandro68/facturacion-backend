@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
-
+const logActividad = require('../utils/logActividad');
 // ==========================================
 // ZONAS
 // ==========================================
@@ -493,6 +493,196 @@ router.delete('/ncf-electronicas/:id', verifyToken, tenantGuard, async (req, res
     res.json({ success: true, mensaje: 'Secuencia eliminada' });
   } catch (error) {
     res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// ============ CAJEROS (Punto de Venta) ============
+
+// Crear tabla cajeros si no existe
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cajeros (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        nombre VARCHAR(150) NOT NULL,
+        cedula VARCHAR(20),
+        pin VARCHAR(4) NOT NULL,
+        estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`ALTER TABLE cajeros ADD COLUMN IF NOT EXISTS usuario VARCHAR(100)`);
+    await pool.query(`ALTER TABLE cajeros ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+    console.log('✅ Tabla cajeros lista');
+  } catch (err) {
+    console.error('Error creando tabla cajeros:', err.message);
+  }
+})();
+
+// GET - Listar cajeros
+router.get('/cajeros', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const result = await pool.query(
+      `SELECT id, nombre, cedula, pin, usuario, estado FROM cajeros WHERE tenant_id = $1 AND estado = 'activo' ORDER BY nombre`,
+      [tenant_id]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('Error listando cajeros:', err);
+    res.status(500).json({ success: false, mensaje: 'Error listando cajeros' });
+  }
+});
+
+// POST - Crear cajero
+router.post('/cajeros', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { nombre, cedula, pin, usuario, password } = req.body;
+
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
+    }
+    if (!pin || !/^\d{4}$/.test(String(pin).trim())) {
+      return res.status(400).json({ success: false, mensaje: 'El PIN debe ser de 4 dígitos numéricos' });
+    }
+    if (!usuario || !usuario.trim()) {
+      return res.status(400).json({ success: false, mensaje: 'El usuario es requerido' });
+    }
+    if (!password || password.trim().length < 4) {
+      return res.status(400).json({ success: false, mensaje: 'La contraseña debe tener al menos 4 caracteres' });
+    }
+
+    // PIN único por tenant (entre cajeros activos)
+    const dupPin = await pool.query(
+      `SELECT nombre FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo'`,
+      [tenant_id, String(pin).trim()]
+    );
+    if (dupPin.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: `Ese PIN ya lo usa el cajero ${dupPin.rows[0].nombre}. Elija otro.` });
+    }
+
+    // Nombre único por tenant
+    const dupNombre = await pool.query(
+      `SELECT nombre FROM cajeros WHERE tenant_id = $1 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2)) AND estado = 'activo'`,
+      [tenant_id, nombre]
+    );
+    if (dupNombre.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: `Ya existe un cajero con el nombre "${dupNombre.rows[0].nombre}".` });
+    }
+
+    // Usuario único GLOBAL (el login no conoce el tenant)
+    const dupUsuario = await pool.query(
+      `SELECT id FROM cajeros WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) AND estado = 'activo'`,
+      [usuario]
+    );
+    if (dupUsuario.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: `El usuario "${usuario.trim()}" ya está en uso. Elija otro.` });
+    }
+
+    const bcrypt = require('bcryptjs');
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    const result = await pool.query(
+      `INSERT INTO cajeros (tenant_id, nombre, cedula, pin, usuario, password_hash)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, nombre, cedula, pin, usuario, estado`,
+      [tenant_id, nombre.trim(), cedula ? cedula.trim() : null, String(pin).trim(), usuario.trim(), password_hash]
+    );
+
+    logActividad(req, 'mantenimiento', 'crear', `Creó cajero ${nombre.trim()}`, result.rows[0].id);
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('Error creando cajero:', err);
+    res.status(500).json({ success: false, mensaje: 'Error creando cajero' });
+  }
+});
+
+// PUT - Editar cajero
+router.put('/cajeros/:id', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const { nombre, cedula, pin, usuario, password } = req.body;
+
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
+    }
+    if (!pin || !/^\d{4}$/.test(String(pin).trim())) {
+      return res.status(400).json({ success: false, mensaje: 'El PIN debe ser de 4 dígitos numéricos' });
+    }
+    if (!usuario || !usuario.trim()) {
+      return res.status(400).json({ success: false, mensaje: 'El usuario es requerido' });
+    }
+
+    // PIN único (excluyendo el propio cajero)
+    const dupPin = await pool.query(
+      `SELECT nombre FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo' AND id != $3`,
+      [tenant_id, String(pin).trim(), id]
+    );
+    if (dupPin.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: `Ese PIN ya lo usa el cajero ${dupPin.rows[0].nombre}. Elija otro.` });
+    }
+
+    // Usuario único GLOBAL (excluyendo el propio cajero)
+    const dupUsuario = await pool.query(
+      `SELECT id FROM cajeros WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) AND estado = 'activo' AND id != $2`,
+      [usuario, id]
+    );
+    if (dupUsuario.rows.length > 0) {
+      return res.status(400).json({ success: false, mensaje: `El usuario "${usuario.trim()}" ya está en uso. Elija otro.` });
+    }
+
+    const result = await pool.query(
+      `UPDATE cajeros SET nombre = $1, cedula = $2, pin = $3, usuario = $4
+       WHERE id = $5 AND tenant_id = $6 RETURNING id, nombre, cedula, pin, usuario, estado`,
+      [nombre.trim(), cedula ? cedula.trim() : null, String(pin).trim(), usuario.trim(), id, tenant_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Cajero no encontrado' });
+    }
+
+    // Solo actualiza la contraseña si viene una nueva
+    if (password && password.trim().length > 0) {
+      if (password.trim().length < 4) {
+        return res.status(400).json({ success: false, mensaje: 'La contraseña debe tener al menos 4 caracteres' });
+      }
+      const bcrypt = require('bcryptjs');
+      const salt = await bcrypt.genSalt(10);
+      const password_hash = await bcrypt.hash(password, salt);
+      await pool.query(
+        `UPDATE cajeros SET password_hash = $1 WHERE id = $2 AND tenant_id = $3`,
+        [password_hash, id, tenant_id]
+      );
+    }
+
+    logActividad(req, 'mantenimiento', 'editar', `Editó cajero ${nombre.trim()}`, id);
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('Error editando cajero:', err);
+    res.status(500).json({ success: false, mensaje: 'Error editando cajero' });
+  }
+});
+
+// DELETE - Eliminar cajero (soft delete)
+router.delete('/cajeros/:id', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE cajeros SET estado = 'inactivo' WHERE id = $1 AND tenant_id = $2 RETURNING nombre`,
+      [id, tenant_id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Cajero no encontrado' });
+    }
+    logActividad(req, 'mantenimiento', 'eliminar', `Eliminó cajero ${result.rows[0].nombre}`, id);
+    res.json({ success: true, mensaje: 'Cajero eliminado' });
+  } catch (err) {
+    console.error('Error eliminando cajero:', err);
+    res.status(500).json({ success: false, mensaje: 'Error eliminando cajero' });
   }
 });
 

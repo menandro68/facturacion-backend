@@ -191,7 +191,63 @@ return res.json({
       });
     }
 
-    // ── 3. Buscar en vendedores ──
+    // ── 3. Buscar en cajeros (entran como operador, solo POS) ──
+    const resultCajero = await pool.query(
+      `SELECT c.*, t.nombre as empresa, t.estado as tenant_estado, t.features
+       FROM cajeros c
+       JOIN tenants t ON c.tenant_id = t.id
+       WHERE LOWER(TRIM(c.usuario)) = LOWER(TRIM($1)) AND c.estado = 'activo'`,
+      [(usuario || email || '')]
+    );
+
+    if (resultCajero.rows.length > 0) {
+      const cajero = resultCajero.rows[0];
+
+      if (rol_esperado && rol_esperado !== 'operador') {
+        return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
+      }
+      if (cajero.tenant_estado !== 'activo') {
+        return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
+      }
+      if (!cajero.password_hash) {
+        return res.status(401).json({ mensaje: 'Cajero sin contraseña asignada' });
+      }
+
+      const passwordValido = await bcrypt.compare(password, cajero.password_hash);
+      if (!passwordValido) {
+        return res.status(401).json({ mensaje: 'Credenciales incorrectas' });
+      }
+
+      const token = jwt.sign(
+        {
+          id: cajero.id,
+          tenant_id: cajero.tenant_id,
+          rol: 'operador',
+          cajero_id: cajero.id,
+          nombre: cajero.nombre,
+          solo_pos: true,
+          modulos_permitidos: ['pos']
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN }
+      );
+
+      return res.json({
+        mensaje: 'Login exitoso ✅',
+        token,
+        usuario: {
+          id: cajero.id,
+          nombre: cajero.nombre,
+          rol: 'operador',
+          empresa: cajero.empresa,
+          features: cajero.features || {},
+          solo_pos: true,
+          modulos_permitidos: ['pos']
+        }
+      });
+    }
+
+    // ── 4. Buscar en vendedores ──
     const resultVendedor = await pool.query(
       `SELECT v.*, t.nombre as empresa, t.estado as tenant_estado
        FROM vendedores v
