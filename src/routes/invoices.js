@@ -672,25 +672,38 @@ for (const item of items) {
         [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, item_base, item_bruto]
       );
     }
-    for (const item of items) {
+for (const item of items) {
       if (!item.product_id) continue
+      // EMPAQUES: si el artículo es hijo, el inventario vive en el padre y se descuenta
+      // la cantidad multiplicada por su factor (ej: 1 caja = 1440 unidades base)
+      const prodInfo = await client.query(
+        'SELECT articulo_padre_id, factor_empaque, nombre FROM products WHERE id = $1 AND tenant_id = $2',
+        [item.product_id, tenant_id]
+      )
+      const productoInventario = prodInfo.rows[0]?.articulo_padre_id || item.product_id
+      const factor = parseFloat(prodInfo.rows[0]?.factor_empaque) > 0 ? parseFloat(prodInfo.rows[0].factor_empaque) : 1
+      const cantidadBase = parseFloat(item.cantidad) * factor
+
       const inv = await client.query(
         'SELECT * FROM inventory WHERE product_id = $1 AND tenant_id = $2',
-        [item.product_id, tenant_id]
+        [productoInventario, tenant_id]
       )
       if (inv.rows.length > 0) {
         const stockAnterior = parseFloat(inv.rows[0].stock_actual)
-        const stockNuevo = stockAnterior - parseFloat(item.cantidad)
+        const stockNuevo = stockAnterior - cantidadBase
         await client.query(
           'UPDATE inventory SET stock_actual = $1, actualizado_en = NOW() WHERE id = $2',
           [stockNuevo, inv.rows[0].id]
         )
+        const detalleEmpaque = factor > 1
+          ? ` (${item.cantidad} x ${factor} = ${cantidadBase} und)`
+          : ''
         await client.query(
           `INSERT INTO inventory_movements 
           (tenant_id, inventory_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
           VALUES ($1, $2, 'salida', $3, $4, $5, $6)`,
-          [tenant_id, inv.rows[0].id, item.cantidad, stockAnterior, stockNuevo,
-           `Factura ${ncf}`]
+          [tenant_id, inv.rows[0].id, cantidadBase, stockAnterior, stockNuevo,
+           `Factura ${ncf}${detalleEmpaque}`]
         )
       }
     }

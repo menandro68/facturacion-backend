@@ -5,6 +5,23 @@ const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
 const logActividad = require('../utils/logActividad');
 
+// ===== EMPAQUES: un artículo puede ser hijo de otro y compartir su inventario =====
+// articulo_padre_id: NULL = artículo normal/padre (dueño del inventario)
+// factor_empaque: cuántas unidades base representa 1 de este artículo (Caja=1440, Tarro=240, Unidad=1)
+// nivel_empaque: etiqueta visible del nivel (Caja, Tarro, Unidad)
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS articulo_padre_id UUID`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS factor_empaque DECIMAL(12,4) DEFAULT 1`);
+    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS nivel_empaque VARCHAR(50)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_padre ON products(articulo_padre_id)`);
+    await pool.query(`UPDATE products SET factor_empaque = 1 WHERE factor_empaque IS NULL`);
+    console.log('✅ Columnas de empaque listas');
+  } catch (err) {
+    console.error('Error creando columnas de empaque:', err.message);
+  }
+})();
+
 // GET - Listar productos
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
@@ -40,7 +57,7 @@ router.get('/:id', verifyToken, tenantGuard, async (req, res) => {
 router.post('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo } = req.body;
+    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo, articulo_padre_id, factor_empaque, nivel_empaque } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
     if (!precio) return res.status(400).json({ success: false, mensaje: 'El precio es requerido' });
 
@@ -62,11 +79,12 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO products (tenant_id, nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      `INSERT INTO products (tenant_id, nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo, articulo_padre_id, factor_empaque, nivel_empaque)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
       [tenant_id, nombre, descripcion, precio, itbis_rate || 18.00, unidad || 'unidad',
        costo || 0, codigo || null, comision_vendedor || 0, beneficio || 0, suplidor || null,
-       stock_minimo || 0, stock_maximo || 0]
+       stock_minimo || 0, stock_maximo || 0,
+       articulo_padre_id || null, parseFloat(factor_empaque) > 0 ? parseFloat(factor_empaque) : 1, nivel_empaque || null]
     );
     logActividad(req, 'articulos', 'crear', `Creó artículo ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -80,7 +98,7 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo } = req.body;
+    const { nombre, descripcion, precio, itbis_rate, unidad, costo, codigo, comision_vendedor, beneficio, suplidor, stock_minimo, stock_maximo, articulo_padre_id, factor_empaque, nivel_empaque } = req.body;
 
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS costo DECIMAL(12,2) DEFAULT 0`);
     await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS codigo VARCHAR(50)`);
@@ -103,11 +121,14 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
       `UPDATE products SET 
         nombre=$1, descripcion=$2, precio=$3, itbis_rate=$4, unidad=$5,
         costo=$6, codigo=$7, comision_vendedor=$8, beneficio=$9, suplidor=$10,
-        stock_minimo=$11, stock_maximo=$12, actualizado_en=NOW()
-       WHERE id=$13 AND tenant_id=$14 RETURNING *`,
+        stock_minimo=$11, stock_maximo=$12,
+        articulo_padre_id=$13, factor_empaque=$14, nivel_empaque=$15, actualizado_en=NOW()
+       WHERE id=$16 AND tenant_id=$17 RETURNING *`,
       [nombre, descripcion, precio, itbis_rate, unidad,
        costo || 0, codigo || null, comision_vendedor || 0, beneficio || 0, suplidor || null,
-       stock_minimo || 0, stock_maximo || 0, id, tenant_id]
+       stock_minimo || 0, stock_maximo || 0,
+       articulo_padre_id || null, parseFloat(factor_empaque) > 0 ? parseFloat(factor_empaque) : 1, nivel_empaque || null,
+       id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Producto no encontrado' });
     logActividad(req, 'articulos', 'editar', `Editó artículo ${nombre}`, id);
