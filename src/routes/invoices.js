@@ -582,7 +582,11 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
   try {
     const { tenant_id } = req.user;
-    const { customer_id, ncf_tipo, notas, fecha_vencimiento, items } = req.body;
+   const { customer_id, ncf_tipo, notas, fecha_vencimiento, items, monto_recibido, devuelta } = req.body;
+    try {
+      await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS monto_recibido DECIMAL(12,2)`);
+      await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS devuelta DECIMAL(12,2)`);
+    } catch (e) { console.error('Error columnas pago POS:', e.message); }
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, mensaje: 'La factura debe tener al menos un item' });
     }
@@ -657,9 +661,11 @@ const total = subtotal + itbis;
     }
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
     const invoice = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id)
-       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14) RETURNING *`,
-      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null]
+ `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id, monto_recibido, devuelta)
+       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null,
+       monto_recibido !== undefined && monto_recibido !== null ? parseFloat(monto_recibido) : null,
+       devuelta !== undefined && devuelta !== null ? parseFloat(devuelta) : null]
     );
     const invoice_id = invoice.rows[0].id;
 for (const item of items) {
@@ -902,11 +908,41 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
     });
     y += 2;
     lineaGuiones();
-    filaLR('SUBTOTAL', parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2}), 9);
-    filaLR('ITBIS', parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2}), 9);
+// ESTRUCTURA FISCAL: Total Bruto -> Descuento -> Sub-Total -> ITBIS -> Neto
+    const fmtN = (n) => parseFloat(n || 0).toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    // El descuento viene registrado en las notas del POS
+    let descuentoTicket = 0;
+    if (data.notas) {
+      const m = String(data.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
+      if (m) descuentoTicket = parseFloat(String(m[1]).replace(/,/g, '')) || 0;
+    }
+    const subtotalNeto = parseFloat(data.subtotal) || 0;
+    const totalBruto = subtotalNeto + descuentoTicket;
+    filaLR('TOTAL BRUTO', fmtN(totalBruto), 9);
+    filaLR('TOTAL DESC.', fmtN(descuentoTicket), 9);
+    filaLR('SUB-TOTAL', fmtN(subtotalNeto), 9);
+    filaLR('TOTAL ITBIS', fmtN(data.itbis), 9);
     y += 3;
-    filaLR('TOTAL A PAGAR', parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2}), 11, true);
+    filaLR('NETO RD$', fmtN(data.total), 11, true);
     y += 5;
+    lineaGuiones();
+    // FORMA DE PAGO Y EFECTIVO
+    y += 2;
+    let formaPagoTicket = '';
+    if (data.notas) {
+      const mp = String(data.notas).match(/POS\s*-\s*Pago:\s*([^|]+)/i);
+      if (mp) formaPagoTicket = mp[1].trim();
+    }
+    if (formaPagoTicket) {
+      filaLR('FORMA DE PAGO', formaPagoTicket, 8);
+    }
+    if (data.monto_recibido !== null && data.monto_recibido !== undefined) {
+      filaLR('RECIBIDO', fmtN(data.monto_recibido), 9);
+    }
+    if (data.devuelta !== null && data.devuelta !== undefined && parseFloat(data.devuelta) > 0) {
+      filaLR('DEVUELTA', fmtN(data.devuelta), 10, true);
+    }
+    y += 3;
     lineaGuiones();
     if (data.numero_factura) {
       y += 2;
