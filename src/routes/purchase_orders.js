@@ -78,7 +78,7 @@ router.get('/:id', async (req, res) => {
       [req.params.id, req.user.tenant_id]
     )
     const items = await pool.query(
-      'SELECT poi.*, p.nombre as producto_nombre FROM purchase_order_items poi LEFT JOIN products p ON poi.product_id = p.id WHERE poi.order_id = $1',
+     'SELECT poi.*, p.nombre as producto_nombre, p.itbis_rate FROM purchase_order_items poi LEFT JOIN products p ON poi.product_id = p.idWHERE poi.order_id = $1',
       [req.params.id]
     )
     res.json({ data: { ...orden.rows[0], items: items.rows } })

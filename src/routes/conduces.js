@@ -193,7 +193,10 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
     const numeroConduce = parseInt(maxNum.rows[0].siguiente);
     const numeroTexto = 'CD-' + String(numeroConduce).padStart(4, '0');
 
- const conduce = await client.query(
+    // Descuento global por porcentaje (se prorratea en el precio de cada item)
+    const pctDescCd = Math.min(Math.max(parseFloat(req.body.descuento_pct) || 0, 0), 100);
+
+    const conduce = await client.query(
       `INSERT INTO conduces (tenant_id, numero_conduce, numero, customer_id, cliente_nombre, chofer_id, chofer_nombre, notas, estado, operador_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'emitido', $9) RETURNING *`,
       [tenant_id, numeroConduce, numeroTexto, customer_id, clienteNombre, chofer_id || null, choferNombre, notas || null, req.user.operador_id || null]
@@ -201,6 +204,7 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
 
     const conduceId = conduce.rows[0].id;
     let totalConduce = 0;
+    let totalBrutoCd = 0;
 
     for (const it of items) {
       let precioUnit = 0;
@@ -216,6 +220,8 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
         }
       }
       const cantidad = parseFloat(it.cantidad) || 0;
+      totalBrutoCd += precioUnit * cantidad;
+      if (pctDescCd > 0) precioUnit = precioUnit * (1 - pctDescCd / 100);
       totalConduce += precioUnit * cantidad;
 
       await client.query(
@@ -242,7 +248,14 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       }
     }
 
-    await client.query(`UPDATE conduces SET total = $1, inventario_rebajado = true WHERE id = $2`, [totalConduce, conduceId]);
+    if (pctDescCd > 0) {
+      const montoDescCd = totalBrutoCd - totalConduce;
+      const notaDescCd = `Descuento: RD$${montoDescCd.toFixed(2)} (${pctDescCd}%)`;
+      const notasFinalCd = notas ? `${notas} | ${notaDescCd}` : notaDescCd;
+      await client.query(`UPDATE conduces SET total = $1, inventario_rebajado = true, notas = $3 WHERE id = $2`, [totalConduce, conduceId, notasFinalCd]);
+    } else {
+      await client.query(`UPDATE conduces SET total = $1, inventario_rebajado = true WHERE id = $2`, [totalConduce, conduceId]);
+    }
 
     await client.query('COMMIT');
     res.status(201).json({ success: true, data: conduce.rows[0] });
@@ -516,8 +529,37 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#cbd5e1').lineWidth(1).stroke();
     y += 12;
 
+  // ESTRUCTURA FISCAL: Total Bruto -> Descuento -> Sub-Total -> ITBIS -> Neto
+    let itbisCond = 0;
+    items.forEach(it => {
+      const c = parseFloat(it.cantidad) || 0;
+      const p = parseFloat(it.precio_unitario) || 0;
+      const r = parseFloat(it.itbis_rate) || 0;
+      const bruto = c * p;
+      itbisCond += bruto - (bruto / (1 + (r / 100)));
+    });
+    const subNetoCond = totalDoc - itbisCond;
+    let descCond = 0;
+    if (d.notas) {
+      const mDescCd = String(d.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
+      if (mDescCd) descCond = parseFloat(String(mDescCd[1]).replace(/,/g, '')) || 0;
+    }
+    const fmtCond = (n) => 'RD$' + parseFloat(n || 0).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const filasCond = [
+      ['TOTAL BRUTO', subNetoCond + descCond],
+      ['TOTAL DESC.', descCond],
+      ['SUB-TOTAL', subNetoCond],
+      ['TOTAL ITBIS', itbisCond]
+    ];
+    doc.fontSize(10).fillColor('#0f172a').font('Helvetica');
+    filasCond.forEach(([etq, val]) => {
+      doc.font('Helvetica').text(etq, M, y, { width: W - M * 2 - 110, align: 'right' });
+      doc.font('Helvetica-Bold').text(fmtCond(val), M, y, { width: W - M * 2, align: 'right' });
+      y += 15;
+    });
+    y += 4;
     doc.fontSize(12).fillColor('#0f172a').font('Helvetica-Bold')
-      .text('TOTAL: RD$' + totalDoc.toLocaleString('es-DO', { minimumFractionDigits: 2 }), M, y, { width: W - M * 2, align: 'right' });
+      .text('NETO RD$: ' + fmtCond(totalDoc), M, y, { width: W - M * 2, align: 'right' });
     y += 24;
 
     if (d.notas) {

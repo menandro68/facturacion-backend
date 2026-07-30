@@ -923,7 +923,7 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
     filaLR('SUB-TOTAL', fmtN(subtotalNeto), 9);
     filaLR('TOTAL ITBIS', fmtN(data.itbis), 9);
     y += 3;
-    filaLR('NETO RD$', fmtN(data.total), 11, true);
+   filaLR('TOTAL A PAGAR', fmtN(data.total), 11, true);
     y += 5;
     lineaGuiones();
     // FORMA DE PAGO Y EFECTIVO
@@ -1261,26 +1261,36 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       doc.fillColor(negro).fontSize(5).font('Helvetica')
          .text('Escanee para ubicacion', M, y + 52, { width: 50, align: 'center' });
     }
-    // TOTALES (solo en la ultima pagina)
+// TOTALES (solo en la ultima pagina) - ESTRUCTURA FISCAL
     const tw = 220;
     const tx = M + col - tw;
-    doc.rect(tx, y, tw, 16).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(9).font('Helvetica')
-       .text('Subtotal:', tx + 12, y + 4);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 4, { width: tw - 12, align: 'right' });
-    y += 16;
-    doc.rect(tx, y, tw, 16).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(9).font('Helvetica')
-       .text('ITBIS (18%):', tx + 12, y + 4);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 4, { width: tw - 12, align: 'right' });
-    y += 16;
+    const fmtTot = (n) => `RD$ ${parseFloat(n || 0).toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    let descTot = 0;
+    if (data.notas) {
+      const mDesc = String(data.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
+      if (mDesc) descTot = parseFloat(String(mDesc[1]).replace(/,/g, '')) || 0;
+    }
+    const subNeto = parseFloat(data.subtotal) || 0;
+    const brutoTot = subNeto + descTot;
+    const filasTot = [
+      ['TOTAL BRUTO', brutoTot],
+      ['TOTAL DESC.', descTot],
+      ['SUB-TOTAL', subNeto],
+      ['TOTAL ITBIS', data.itbis]
+    ];
+    filasTot.forEach(([etq, val]) => {
+      doc.rect(tx, y, tw, 16).fill(grisFondo).stroke(grisBorde);
+      doc.fillColor(negro).fontSize(9).font('Helvetica')
+         .text(etq, tx + 12, y + 4);
+      doc.font('Helvetica-Bold')
+         .text(fmtTot(val), tx, y + 4, { width: tw - 12, align: 'right' });
+      y += 16;
+    });
     doc.rect(tx, y, tw, 24).fill(azulOscuro);
     doc.fillColor('white').fontSize(11).font('Helvetica-Bold')
-       .text('TOTAL:', tx + 12, y + 7);
+       .text('NETO RD$:', tx + 12, y + 7);
     doc.fontSize(12)
-       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 6, { width: tw - 12, align: 'right' });
+       .text(fmtTot(data.total), tx, y + 6, { width: tw - 12, align: 'right' });
 
     // Linea de corte en la ultima pagina
     dibujarLineaCorte();
@@ -1463,26 +1473,36 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
       doc.fillColor(negro).fontSize(6).font('Helvetica')
          .text('Escanee para ubicacion', M, y + 67, { width: 65, align: 'center' });
     }
-    // TOTALES
+  // TOTALES - ESTRUCTURA FISCAL
     const tw = 220;
     const tx = M + col - tw;
-    doc.rect(tx, y, tw, 22).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(10).font('Helvetica')
-       .text('Subtotal:', tx + 12, y + 7);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.subtotal).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
-    y += 22;
-    doc.rect(tx, y, tw, 22).fill(grisFondo).stroke(grisBorde);
-    doc.fillColor(negro).fontSize(10).font('Helvetica')
-       .text('ITBIS (18%):', tx + 12, y + 7);
-    doc.font('Helvetica-Bold')
-       .text(`RD$ ${parseFloat(data.itbis).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 7, { width: tw - 12, align: 'right' });
-    y += 22;
+    const fmtTotC = (n) => `RD$ ${parseFloat(n || 0).toLocaleString('es-DO', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    let descTotC = 0;
+    if (data.notas) {
+      const mDescC = String(data.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
+      if (mDescC) descTotC = parseFloat(String(mDescC[1]).replace(/,/g, '')) || 0;
+    }
+    const subNetoC = parseFloat(data.subtotal) || 0;
+    const brutoTotC = subNetoC + descTotC;
+    const filasTotC = [
+      ['TOTAL BRUTO', brutoTotC],
+      ['TOTAL DESC.', descTotC],
+      ['SUB-TOTAL', subNetoC],
+      ['TOTAL ITBIS', data.itbis]
+    ];
+    filasTotC.forEach(([etq, val]) => {
+      doc.rect(tx, y, tw, 22).fill(grisFondo).stroke(grisBorde);
+      doc.fillColor(negro).fontSize(10).font('Helvetica')
+         .text(etq, tx + 12, y + 7);
+      doc.font('Helvetica-Bold')
+         .text(fmtTotC(val), tx, y + 7, { width: tw - 12, align: 'right' });
+      y += 22;
+    });
     doc.rect(tx, y, tw, 32).fill(azulOscuro);
     doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
-       .text('TOTAL:', tx + 12, y + 9);
+       .text('NETO RD$:', tx + 12, y + 9);
     doc.fontSize(14)
-       .text(`RD$ ${parseFloat(data.total).toLocaleString('es-DO', {minimumFractionDigits: 2})}`, tx, y + 9, { width: tw - 12, align: 'right' });
+       .text(fmtTotC(data.total), tx, y + 9, { width: tw - 12, align: 'right' });
     y += 42;
 
     // E-CF
