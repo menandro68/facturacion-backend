@@ -339,6 +339,19 @@ const pedidos = await pool.query(`
         AND operador_id = $2
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+ `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
+
+    // 8.1 Detalle de conduces creados por este operador
+    const detalleConduces = await pool.query(`
+      SELECT c.id, c.numero, c.total, c.estado, c.creado_en,
+             COALESCE(c.cliente_nombre, cu.nombre) as cliente_nombre
+      FROM conduces c
+      LEFT JOIN customers cu ON c.customer_id = cu.id
+      WHERE c.tenant_id = $1
+        AND c.operador_id = $2
+        AND ($3::date IS NULL OR (c.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (c.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+      ORDER BY c.creado_en DESC
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
 
    // 6.6 Registro de actividad (bitácora de todas las acciones del operador)
@@ -447,7 +460,8 @@ const pedidos = await pool.query(`
             monto: parseFloat(conduces.rows[0].monto)
           }
         },
-     detalle_facturas: detalleFacturas.rows,
+   detalle_facturas: detalleFacturas.rows,
+        detalle_conduces: detalleConduces.rows,
         detalle_pagos: detallePagos.rows,
         registro_actividad: actividad.rows
       }

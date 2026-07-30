@@ -827,8 +827,8 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
       'E34': 'NOTA DE CREDITO ELECTRONICA',
       'B01': 'FACTURA CREDITO FISCAL',
       'B02': 'FACTURA CONSUMIDOR FINAL',
-      'B15': 'FACTURA GUBERNAMENTAL'
-    }[data.ncf_tipo] || 'FACTURA';
+'B15': 'FACTURA GUBERNAMENTAL'
+    }[data.ncf_tipo] || (data.estado === 'nota_credito' ? 'NOTA DE CREDITO' : 'FACTURA');
     const W = 200;
     const M = 8;
     const doc = new PDFDocument({ margin: M, size: [W, 1100] });
@@ -1066,8 +1066,8 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       'E34': 'NOTA DE CREDITO ELECTRONICA',
       'B01': 'FACTURA CREDITO FISCAL',
       'B02': 'FACTURA CONSUMIDOR FINAL',
-      'B15': 'FACTURA GUBERNAMENTAL'
-    }[data.ncf_tipo] || 'FACTURA';
+ 'B15': 'FACTURA GUBERNAMENTAL'
+    }[data.ncf_tipo] || (data.estado === 'nota_credito' ? 'NOTA DE CREDITO' : 'FACTURA');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
@@ -1333,8 +1333,8 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
       'E34': 'NOTA DE CREDITO ELECTRONICA',
       'B01': 'FACTURA CREDITO FISCAL',
       'B02': 'FACTURA CONSUMIDOR FINAL',
-      'B15': 'FACTURA GUBERNAMENTAL'
-    }[data.ncf_tipo] || 'FACTURA';
+'B15': 'FACTURA GUBERNAMENTAL'
+    }[data.ncf_tipo] || (data.estado === 'nota_credito' ? 'NOTA DE CREDITO' : 'FACTURA');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=factura-carta-${data.ncf || data.id}.pdf`);
     doc.pipe(res);
