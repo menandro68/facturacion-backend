@@ -47,17 +47,18 @@ router.post('/login', async (req, res) => {
 router.get('/tenants', verifySuperAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT t.*, 
-        (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) as total_admins,
-        (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id) as total_operadores,
-        (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id) as total_vendedores,
+SELECT t.*, 
+        (SELECT COUNT(*) FROM users WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) as total_admins,
+        (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) as total_operadores,
+        (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) as total_vendedores,
         (
-          (SELECT COUNT(*) FROM users WHERE tenant_id = t.id) +
-          (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id) +
-          (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id)
+          (SELECT COUNT(*) FROM users WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) +
+          (SELECT COUNT(*) FROM operadores WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) +
+          (SELECT COUNT(*) FROM vendedores WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id))
         ) as total_usuarios,
-        (SELECT COUNT(*) FROM invoices WHERE tenant_id = t.id) as total_facturas
+        (SELECT COUNT(*) FROM invoices WHERE tenant_id = t.id OR tenant_id IN (SELECT id FROM tenants WHERE parent_tenant_id = t.id)) as total_facturas
       FROM tenants t
+      WHERE t.parent_tenant_id IS NULL
       ORDER BY t.creado_en DESC
     `);
     res.json({ success: true, data: result.rows });
