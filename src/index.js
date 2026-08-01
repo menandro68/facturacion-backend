@@ -30,11 +30,32 @@ app.set('trust proxy', 1)
 
 // Seguridad
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+// CORS con lista blanca. Los origenes se configuran en la variable
+// CORS_ORIGINS de Railway (separados por coma). Si no esta definida,
+// se usa la lista por defecto. Peticiones sin origen (APK nativa,
+// Postman, server-to-server) se permiten porque no son navegador.
+const origenesPermitidos = (process.env.CORS_ORIGINS || [
+  'https://facturacion.squidapps.org',
+  'https://facturacion-saas-production.up.railway.app',
+  'capacitor://localhost',
+  'https://localhost',
+  'http://localhost:5173'
+].join(',')).split(',').map(o => o.trim()).filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (origenesPermitidos.includes(origin)) return callback(null, true);
+    console.warn('CORS bloqueado para origen:', origin);
+    return callback(new Error('Origen no permitido por CORS'));
+  },
+  credentials: true
+}));
 app.use(express.json());
 
-// Rate limiter SOLO para autenticación (anti brute-force)
-// El resto del sistema NO tiene límite para no afectar a clientes empresariales con múltiples operadores
+// Rate limiter ESTRICTO para autenticación (anti brute-force)
+// El resto del sistema usa apiLimiter, un techo holgado que no afecta
+// a clientes empresariales con múltiples operadores
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 20, // 20 intentos fallidos cada 15 min por IP
@@ -42,6 +63,18 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true // Los logins exitosos NO cuentan
+});
+
+// Rate limiter GLOBAL: techo anti-abuso, no control de uso normal.
+// 1000 req / 15 min por IP: holgado para oficinas con muchos operadores,
+// pero corta scripts automatizados que martillan la API.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: { mensaje: 'Demasiadas peticiones. Espere unos minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health' || req.path === '/ready'
 });
 
 // Archivos estáticos
@@ -57,23 +90,23 @@ app.use(express.static(path.join(__dirname, '../public'), {
 
 // Rutas
 app.use('/auth', authLimiter, authRoutes);
-app.use('/tenant', tenantRoutes);
-app.use('/customers', customerRoutes);
-app.use('/products', productRoutes);
-app.use('/invoices', invoiceRoutes);
-app.use('/payments', paymentRoutes);
-app.use('/reports', reportRoutes);
-app.use('/suppliers', supplierRoutes);
-app.use('/inventory', inventoryRoutes);
-app.use('/pos', posRoutes);
-app.use('/accounts-receivable', arRoutes);
-app.use('/accounts-payable', apRoutes);
-app.use('/mantenimiento', mantenimientoRoutes);
-app.use('/purchase-orders', purchaseOrderRoutes);
-app.use('/devoluciones', devolucionesRoutes);
-app.use('/conduces', conducesRoutes);
-app.use('/operadores', operadoresRoutes);
-app.use('/super-admin', superAdminRoutes);
+app.use('/tenant', apiLimiter, tenantRoutes);
+app.use('/customers', apiLimiter, customerRoutes);
+app.use('/products', apiLimiter, productRoutes);
+app.use('/invoices', apiLimiter, invoiceRoutes);
+app.use('/payments', apiLimiter, paymentRoutes);
+app.use('/reports', apiLimiter, reportRoutes);
+app.use('/suppliers', apiLimiter, supplierRoutes);
+app.use('/inventory', apiLimiter, inventoryRoutes);
+app.use('/pos', apiLimiter, posRoutes);
+app.use('/accounts-receivable', apiLimiter, arRoutes);
+app.use('/accounts-payable', apiLimiter, apRoutes);
+app.use('/mantenimiento', apiLimiter, mantenimientoRoutes);
+app.use('/purchase-orders', apiLimiter, purchaseOrderRoutes);
+app.use('/devoluciones', apiLimiter, devolucionesRoutes);
+app.use('/conduces', apiLimiter, conducesRoutes);
+app.use('/operadores', apiLimiter, operadoresRoutes);
+app.use('/super-admin', apiLimiter, superAdminRoutes);
 
 // === HEALTH CHECK PARA MONITOREO DE RAILWAY (LIVENESS) ===
 // Endpoint de "liveness check" estándar profesional (Kubernetes/Cloud Run/AWS).
