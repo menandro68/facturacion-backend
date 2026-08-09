@@ -72,12 +72,20 @@ const { invoice_id, conduce_id, monto, metodo, referencia, notas } = req.body;
         `SELECT COALESCE(SUM(monto), 0) as total_pagado FROM payments WHERE conduce_id = $1 AND estado = 'confirmado'`,
         [conduce_id]
       );
+// Restar notas de credito emitidas sobre este conduce
+      const ncCdSum = await client.query(
+        `SELECT COALESCE(SUM(total), 0) as total_nc FROM conduces_nc WHERE conduce_id = $1 AND tenant_id = $2 AND estado = 'emitida'`,
+        [conduce_id, tenant_id]
+      );
+      const totalNcCd = parseFloat(ncCdSum.rows[0].total_nc);
+      const totalNetoCd = parseFloat(conduce.rows[0].total) - totalNcCd;
       await client.query('COMMIT');
       return res.status(201).json({
         success: true,
         data: paymentCd.rows[0],
         total_pagado: parseFloat(pagosCd.rows[0].total_pagado),
-        total_factura: parseFloat(conduce.rows[0].total)
+        total_nc: totalNcCd,
+        total_factura: totalNetoCd
       });
     }
     // ===== FIN PAGO A CONDUCE =====

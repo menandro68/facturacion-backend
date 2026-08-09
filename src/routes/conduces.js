@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
@@ -750,5 +750,101 @@ router.get('/nc/:id/pdf', async (req, res) => {
     res.status(500).json({ mensaje: error.message })
   }
 })
+
+// PUT - Asignar chofer a un conduce
+router.put('/:id/asignar-chofer', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const { chofer_id } = req.body;
+    let choferNombre = null;
+    if (chofer_id) {
+      const cho = await pool.query(`SELECT nombre FROM choferes WHERE id = $1 AND tenant_id = $2`, [chofer_id, tenant_id]);
+      if (cho.rows[0]) choferNombre = cho.rows[0].nombre;
+    }
+    const result = await pool.query(
+      `UPDATE conduces SET chofer_id = $1, chofer_nombre = $2 WHERE id = $3 AND tenant_id = $4 RETURNING *`,
+      [chofer_id || null, choferNombre, id, tenant_id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' });
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// PUT - Editar conduce (solo si no esta facturado ni anulado)
+router.put('/:id/editar', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const { customer_id, notas, items } = req.body;
+    const pctDescEd = Math.min(Math.max(parseFloat(req.body.descuento_pct) || 0, 0), 100);
+    if (!items || items.length === 0) return res.status(400).json({ success: false, mensaje: 'Debe incluir al menos un articulo' });
+    await client.query('BEGIN');
+    const cdQ = await client.query(`SELECT * FROM conduces WHERE id = $1 AND tenant_id = $2`, [id, tenant_id]);
+    if (!cdQ.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' }); }
+    const cd = cdQ.rows[0];
+    if (cd.facturado) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede editar un conduce ya facturado' }); }
+    if (cd.estado === 'anulado') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede editar un conduce anulado' }); }
+    const itemsViejos = await client.query(`SELECT * FROM conduces_items WHERE conduce_id = $1`, [id]);
+    for (const iv of itemsViejos.rows) {
+      if (!iv.product_id) continue;
+      const invV = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [iv.product_id, tenant_id]);
+      if (invV.rows.length > 0) {
+        const stockAntV = parseFloat(invV.rows[0].stock_actual);
+        const stockNuevoV = stockAntV + parseFloat(iv.cantidad);
+        await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoV, invV.rows[0].id]);
+        await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'entrada',$3,$4,$5,$6)`, [tenant_id, invV.rows[0].id, parseFloat(iv.cantidad), stockAntV, stockNuevoV, `Reversion por edicion de conduce ${cd.numero}`]);
+      }
+    }
+    await client.query(`DELETE FROM conduces_items WHERE conduce_id = $1`, [id]);
+    let clienteNombreEd = cd.cliente_nombre;
+    if (customer_id && customer_id !== cd.customer_id) {
+      const cliEd = await client.query(`SELECT nombre FROM customers WHERE id = $1 AND tenant_id = $2`, [customer_id, tenant_id]);
+      if (cliEd.rows[0]) clienteNombreEd = cliEd.rows[0].nombre;
+    }
+    let totalEd = 0, totalBrutoEd = 0;
+    for (const it of items) {
+      let precioUnitEd = 0, itbisRateEd = 0;
+      if (it.product_id) {
+        const prodEd = await client.query(`SELECT precio, itbis_rate FROM products WHERE id = $1 AND tenant_id = $2`, [it.product_id, tenant_id]);
+        if (prodEd.rows[0]) {
+          precioUnitEd = parseFloat(prodEd.rows[0].precio) || 0;
+          itbisRateEd = parseFloat(prodEd.rows[0].itbis_rate) || 0;
+        }
+      }
+      const cantEd = parseFloat(it.cantidad) || 0;
+      totalBrutoEd += precioUnitEd * cantEd;
+      if (pctDescEd > 0) precioUnitEd = precioUnitEd * (1 - pctDescEd / 100);
+      totalEd += precioUnitEd * cantEd;
+      await client.query(`INSERT INTO conduces_items (conduce_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate) VALUES ($1, $2, $3, $4, $5, $6)`, [id, it.product_id || null, it.descripcion || '', cantEd, precioUnitEd, itbisRateEd]);
+      if (it.product_id) {
+        const invEd = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [it.product_id, tenant_id]);
+        if (invEd.rows.length > 0) {
+          const stockAntEd = parseFloat(invEd.rows[0].stock_actual);
+          const stockNuevoEd = stockAntEd - cantEd;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoEd, invEd.rows[0].id]);
+          await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'salida',$3,$4,$5,$6)`, [tenant_id, invEd.rows[0].id, cantEd, stockAntEd, stockNuevoEd, `Conduce ${cd.numero} (editado)`]);
+        }
+      }
+    }
+    let notasFinalEd = notas || null;
+    if (pctDescEd > 0) {
+      const montoDescEd = totalBrutoEd - totalEd;
+      const notaDescEd = `Descuento: RD${montoDescEd.toFixed(2)} (${pctDescEd}%)`;
+      notasFinalEd = notas ? `${notas} | ${notaDescEd}` : notaDescEd;
+    }
+    const upd = await client.query(`UPDATE conduces SET customer_id = $1, cliente_nombre = $2, notas = $3, total = $4, inventario_rebajado = true WHERE id = $5 AND tenant_id = $6 RETURNING *`, [customer_id || cd.customer_id, clienteNombreEd, notasFinalEd, totalEd, id, tenant_id]);
+    await client.query('COMMIT');
+    res.json({ success: true, data: upd.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
 
 module.exports = router;

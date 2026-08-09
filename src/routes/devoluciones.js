@@ -228,20 +228,7 @@ router.put('/:id/procesar', async (req, res) => {
            VALUES ($1,$2,$3,$4,$5)`,
           [ncIdCd, it.product_id || null, it.descripcion, it.cantidad, it.precio_unitario || 0]
         )
-        if (it.product_id) {
-          const invCd = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [it.product_id, tenant_id])
-          if (invCd.rows.length > 0) {
-            const stockActualCd = parseFloat(invCd.rows[0].stock_actual)
-            const cantidadCd = parseFloat(it.cantidad)
-            const stockNuevoCd = stockActualCd + cantidadCd
-            await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoCd, invCd.rows[0].id])
-            await client.query(
-              `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
-               VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
-              [tenant_id, invCd.rows[0].id, cantidadCd, stockActualCd, stockNuevoCd, `NC Conduce ${numeroTextoNcCd} (devolucion ${d.numero})`]
-            )
-          }
-        }
+  // El inventario ya fue devuelto al APROBAR la devolucion. No duplicar aqui.
       }
 
   await client.query(

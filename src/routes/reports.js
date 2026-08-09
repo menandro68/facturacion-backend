@@ -129,20 +129,41 @@ const hoy = await pool.query(
       `SELECT 
         COUNT(*) FILTER (WHERE estado NOT IN ('nota_credito', 'cotizacion', 'borrador', 'anulada', 'pedido')) as facturas_hoy,
         COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as ventas_hoy
-       FROM invoices i
+  FROM invoices i
        WHERE tenant_id = $1
        AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
       [tenant_id]
     );
+    // Conduces emitidos hoy (no facturados)
+    const conducesHoy = await pool.query(
+      `SELECT COUNT(*) as cantidad, COALESCE(SUM(total), 0) as total_conduces
+       FROM conduces
+       WHERE tenant_id = $1
+         AND estado = 'emitido'
+         AND COALESCE(facturado, false) = false
+         AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
+      [tenant_id]
+    );
+    hoy.rows[0].facturas_hoy = parseInt(hoy.rows[0].facturas_hoy || 0) + parseInt(conducesHoy.rows[0].cantidad || 0);
+    hoy.rows[0].ventas_hoy = parseFloat(hoy.rows[0].ventas_hoy || 0) + parseFloat(conducesHoy.rows[0].total_conduces || 0);
     // Cobrado hoy desde payments (pagos confirmados de hoy, hora RD)
     const cobradoHoy = await pool.query(
-      `SELECT COALESCE(SUM(monto), 0) as cobrado_hoy
+  `SELECT COALESCE(SUM(monto), 0) as cobrado_hoy
        FROM payments
        WHERE tenant_id = $1
        AND estado = 'confirmado'
        AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
       [tenant_id]
     );
+    // Cobrado hoy desde el Punto de Venta (tabla pos_pagos)
+    const cobradoPosHoy = await pool.query(
+      `SELECT COALESCE(SUM(monto), 0) as cobrado_pos
+       FROM pos_pagos
+       WHERE tenant_id = $1
+       AND DATE(creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo') = DATE(NOW() AT TIME ZONE 'America/Santo_Domingo')`,
+      [tenant_id]
+    );
+    cobradoHoy.rows[0].cobrado_hoy = parseFloat(cobradoHoy.rows[0].cobrado_hoy || 0) + parseFloat(cobradoPosHoy.rows[0].cobrado_pos || 0);
 
     // Resumen del mes
     const mes = await pool.query(
@@ -151,12 +172,41 @@ const hoy = await pool.query(
         COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as ventas_mes,
         COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as cobrado_mes,
         COALESCE(SUM(CASE WHEN estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido') THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) - COALESCE(SUM(CASE WHEN estado = 'pagada' THEN total - COALESCE((SELECT SUM(nc.total) FROM invoices nc WHERE nc.referencia_id = i.id AND nc.estado = 'nota_credito' AND nc.tenant_id = i.tenant_id), 0) END), 0) as pendiente_mes
-       FROM invoices i
+    FROM invoices i
        WHERE tenant_id = $1
        AND DATE_TRUNC('month', creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
       [tenant_id]
     );
-
+    // Conduces del mes (emitidos, no facturados) + pagos confirmados de conduces
+    const conducesMes = await pool.query(
+      `SELECT COUNT(*) as cantidad,
+              COALESCE(SUM(cd.total), 0) as total_conduces,
+              COALESCE((SELECT SUM(p.monto) FROM payments p
+                        JOIN conduces c2 ON c2.id = p.conduce_id
+                        WHERE c2.tenant_id = $1 AND p.estado = 'confirmado'
+                          AND DATE_TRUNC('month', c2.creado_en) = DATE_TRUNC('month', CURRENT_DATE)), 0) as cobrado_conduces
+       FROM conduces cd
+       WHERE cd.tenant_id = $1
+         AND cd.estado = 'emitido'
+         AND COALESCE(cd.facturado, false) = false
+         AND DATE_TRUNC('month', cd.creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
+      [tenant_id]
+    );
+mes.rows[0].facturas_mes = parseInt(mes.rows[0].facturas_mes || 0) + parseInt(conducesMes.rows[0].cantidad || 0);
+    mes.rows[0].ventas_mes = parseFloat(mes.rows[0].ventas_mes || 0) + parseFloat(conducesMes.rows[0].total_conduces || 0);
+    mes.rows[0].cobrado_mes = parseFloat(mes.rows[0].cobrado_mes || 0) + parseFloat(conducesMes.rows[0].cobrado_conduces || 0);
+    // Sumar cobros POS solo si no estan ya contados como factura pagada
+    const cobradoPosNoDuplicado = await pool.query(
+      `SELECT COALESCE(SUM(pp.monto), 0) as monto
+       FROM pos_pagos pp
+       JOIN invoices i2 ON i2.id = pp.invoice_id
+       WHERE pp.tenant_id = $1
+         AND i2.estado NOT IN ('anulada', 'nota_credito', 'cotizacion', 'borrador', 'pedido', 'pagada')
+         AND DATE_TRUNC('month', pp.creado_en) = DATE_TRUNC('month', CURRENT_DATE)`,
+      [tenant_id]
+    );
+    mes.rows[0].cobrado_mes = parseFloat(mes.rows[0].cobrado_mes) + parseFloat(cobradoPosNoDuplicado.rows[0].monto || 0);
+    mes.rows[0].pendiente_mes = parseFloat(mes.rows[0].ventas_mes) - parseFloat(mes.rows[0].cobrado_mes);
     // Últimas 5 facturas
     const ultimas = await pool.query(
       `SELECT i.id, i.ncf, i.estado, i.total, i.creado_en, c.nombre as cliente_nombre

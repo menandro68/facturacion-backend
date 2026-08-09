@@ -100,6 +100,46 @@ router.get('/tenants/:id/usuarios', verifySuperAdmin, async (req, res) => {
   }
 });
 
+// GET - Obtener los feature flags de un tenant
+router.get('/tenants/:id/features', verifySuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT features FROM tenants WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Tenant no encontrado' });
+    }
+    res.json({ success: true, features: result.rows[0].features || {} });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
+// PUT - Guardar los feature flags de un tenant (merge sobre los existentes)
+router.put('/tenants/:id/features', verifySuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { features } = req.body;
+    if (!features || typeof features !== 'object' || Array.isArray(features)) {
+      return res.status(400).json({ success: false, mensaje: 'Features inválidos' });
+    }
+    const result = await pool.query(
+      `UPDATE tenants
+       SET features = COALESCE(features, '{}'::jsonb) || $1::jsonb
+       WHERE id = $2 RETURNING features`,
+      [JSON.stringify(features), id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, mensaje: 'Tenant no encontrado' });
+    }
+    res.json({ success: true, features: result.rows[0].features || {} });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 // POST - Crear nuevo tenant (con su usuario admin)
 router.post('/tenants', verifySuperAdmin, async (req, res) => {
   const client = await pool.connect();

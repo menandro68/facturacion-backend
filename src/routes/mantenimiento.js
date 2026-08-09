@@ -135,7 +135,7 @@ router.post('/vendedores', verifyToken, tenantGuard, async (req, res) => {
         [tenant_id, zona_id]
       );
       if (zonaOcupada.rows[0]) {
-        return res.status(400).json({ success: false, mensaje: `Esa zona ya estÃ¡ asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
+        return res.status(400).json({ success: false, mensaje: `Esa zona ya está asignada al vendedor: ${zonaOcupada.rows[0].nombre}` });
       }
     }
     // Validar nombre de vendedor unico por empresa (tenant), sin distinguir mayusculas/espacios
