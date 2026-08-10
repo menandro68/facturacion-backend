@@ -555,12 +555,12 @@ router.post('/cajeros', verifyToken, tenantGuard, async (req, res) => {
     }
 
     // PIN único por tenant (entre cajeros activos)
-    const dupPin = await pool.query(
-      `SELECT nombre FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo'`,
+const dupPin = await pool.query(
+      `SELECT id FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo'`,
       [tenant_id, String(pin).trim()]
     );
     if (dupPin.rows.length > 0) {
-      return res.status(400).json({ success: false, mensaje: `Ese PIN ya lo usa el cajero ${dupPin.rows[0].nombre}. Elija otro.` });
+      return res.status(400).json({ success: false, mensaje: 'Ese PIN ya está en uso. Elija otro.' });
     }
 
     // Nombre único por tenant
@@ -618,11 +618,11 @@ router.put('/cajeros/:id', verifyToken, tenantGuard, async (req, res) => {
 
     // PIN único (excluyendo el propio cajero)
     const dupPin = await pool.query(
-      `SELECT nombre FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo' AND id != $3`,
+      `SELECT id FROM cajeros WHERE tenant_id = $1 AND pin = $2 AND estado = 'activo' AND id != $3`,
       [tenant_id, String(pin).trim(), id]
     );
     if (dupPin.rows.length > 0) {
-      return res.status(400).json({ success: false, mensaje: `Ese PIN ya lo usa el cajero ${dupPin.rows[0].nombre}. Elija otro.` });
+      return res.status(400).json({ success: false, mensaje: 'Ese PIN ya está en uso. Elija otro.' });
     }
 
     // Usuario único GLOBAL (excluyendo el propio cajero)

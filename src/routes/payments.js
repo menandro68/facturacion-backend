@@ -99,8 +99,38 @@ const { invoice_id, conduce_id, monto, metodo, referencia, notas } = req.body;
     if (invoice.rows[0].estado === 'anulada') {
       return res.status(400).json({ success: false, mensaje: 'No se puede pagar una factura anulada' });
     }
-    if (invoice.rows[0].estado === 'pagada') {
+if (invoice.rows[0].estado === 'pagada') {
       return res.status(400).json({ success: false, mensaje: 'La factura ya está pagada' });
+    }
+
+    // ── Validar balance real: pagos CONFIRMADOS + PENDIENTES, menos notas de credito ──
+    const pagosPrevios = await client.query(
+      `SELECT COALESCE(SUM(monto), 0) as total FROM payments
+       WHERE invoice_id = $1 AND (estado = 'confirmado' OR estado = 'pendiente' OR estado IS NULL)`,
+      [invoice_id]
+    );
+    const ncPrevias = await client.query(
+      `SELECT COALESCE(SUM(total), 0) as total FROM invoices
+       WHERE referencia_id = $1 AND estado = 'nota_credito' AND tenant_id = $2`,
+      [invoice_id, tenant_id]
+    );
+    const yaPagado = parseFloat(pagosPrevios.rows[0].total);
+    const ncAplicadas = parseFloat(ncPrevias.rows[0].total);
+    const balancePendiente = parseFloat(invoice.rows[0].total) - ncAplicadas - yaPagado;
+
+    if (balancePendiente <= 0.01) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        mensaje: 'Esta factura ya tiene pagos que cubren el total. No se puede registrar otro pago.'
+      });
+    }
+    if (parseFloat(monto) > balancePendiente + 0.01) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        mensaje: `El monto excede el balance pendiente de la factura (RD$${balancePendiente.toFixed(2)}).`
+      });
     }
 
     // Registrar pago
