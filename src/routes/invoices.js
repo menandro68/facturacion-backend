@@ -1065,8 +1065,23 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
       const mp = String(data.notas).match(/POS\s*-\s*Pago:\s*([^|]+)/i);
       if (mp) formaPagoTicket = mp[1].trim();
     }
-    if (formaPagoTicket) {
-      filaLR('FORMA DE PAGO', formaPagoTicket, 8);
+ if (formaPagoTicket) {
+      // Pago mixto: desglosar cada metodo en su propia linea para que no se monte
+      const mixMatch = String(formaPagoTicket).match(/^Mixto\s*\((.+)\)\s*$/i);
+      if (mixMatch) {
+        filaLR('FORMA DE PAGO', 'Mixto', 8);
+        mixMatch[1].split('+').forEach(parte => {
+          const t = parte.trim();
+          const m = t.match(/^(.+?)\s*RD\$\s*([\d.,]+)$/i);
+          if (m) {
+            filaLR(`  ${m[1].trim()}`, m[2].trim(), 8);
+          } else if (t) {
+            filaLR(`  ${t}`, '', 8);
+          }
+        });
+      } else {
+        filaLR('FORMA DE PAGO', formaPagoTicket, 8);
+      }
     }
     if (data.monto_recibido !== null && data.monto_recibido !== undefined) {
       filaLR('RECIBIDO', fmtN(data.monto_recibido), 9);
