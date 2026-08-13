@@ -21,7 +21,9 @@ const createTables = async () => {
     // Jerarquia de empresas: parent_tenant_id (empresa padre) y quien la creo
     await pool.query(`
       ALTER TABLE tenants ADD COLUMN IF NOT EXISTS parent_tenant_id UUID REFERENCES tenants(id);
-      ALTER TABLE tenants ADD COLUMN IF NOT EXISTS creado_por_usuario_id UUID;
+     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS creado_por_usuario_id UUID;
+      ALTER TABLE tenants ALTER COLUMN telefono TYPE VARCHAR(60);
+      ALTER TABLE tenants ADD COLUMN IF NOT EXISTS actividad VARCHAR(120);
       CREATE INDEX IF NOT EXISTS idx_tenants_parent ON tenants(parent_tenant_id);
     `);
     console.log('Columnas parent_tenant_id, creado_por_usuario_id agregadas a tenants');

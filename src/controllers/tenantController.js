@@ -6,7 +6,7 @@ const getProfile = async (req, res) => {
     const { tenant_id } = req.user;
     const result = await pool.query(
       `SELECT id, nombre, rnc, email, telefono, 
-              direccion, logo_url, plan, estado, creado_en 
+              direccion, actividad, logo_url, plan, estado, creado_en
        FROM tenants WHERE id = $1`,
       [tenant_id]
     );
@@ -24,17 +24,18 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, rnc, email, telefono, direccion } = req.body;
+const { nombre, rnc, email, telefono, direccion, actividad } = req.body;
     const result = await pool.query(
       `UPDATE tenants 
        SET nombre = COALESCE($1, nombre),
            rnc = COALESCE($2, rnc),
            email = COALESCE($3, email),
            telefono = COALESCE($4, telefono),
-           direccion = COALESCE($5, direccion)
-       WHERE id = $6
-       RETURNING id, nombre, rnc, email, telefono, direccion, plan`,
-      [nombre, rnc, email, telefono, direccion, tenant_id]
+           direccion = COALESCE($5, direccion),
+           actividad = COALESCE($6, actividad)
+       WHERE id = $7
+       RETURNING id, nombre, rnc, email, telefono, direccion, actividad, plan`,
+      [nombre, rnc, email, telefono, direccion, actividad, tenant_id]
     );
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {

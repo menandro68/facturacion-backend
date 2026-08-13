@@ -81,7 +81,7 @@ router.put('/sub-empresa/:id', async (req, res) => {
       return res.status(403).json({ success: false, mensaje: 'Solo el admin puede editar empresas' });
     }
 const { id } = req.params;
-    const { nombre, rnc, email, telefono, direccion, admin_username, admin_password, admin_nombre } = req.body;
+    const { nombre, rnc, email, telefono, direccion, actividad, admin_username, admin_password, admin_nombre } = req.body;
     if (!nombre || !email) {
       return res.status(400).json({ success: false, mensaje: 'Nombre y email son obligatorios' });
     }
@@ -98,9 +98,9 @@ const { id } = req.params;
       await client.query('BEGIN');
       // Actualizar datos de la empresa
       const result = await client.query(
-        `UPDATE tenants SET nombre = $1, rnc = $2, email = $3, telefono = $4, direccion = $5
-         WHERE id = $6 RETURNING *`,
-        [nombre, rnc || null, email, telefono || null, direccion || null, id]
+        `UPDATE tenants SET nombre = $1, rnc = $2, email = $3, telefono = $4, direccion = $5, actividad = $6
+         WHERE id = $7 RETURNING *`,
+        [nombre, rnc || null, email, telefono || null, direccion || null, actividad || null, id]
       );
       // Si envia credenciales, actualizar el admin de esa empresa
       if (admin_username || admin_password || admin_nombre) {

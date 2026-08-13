@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
@@ -596,7 +596,7 @@ let subtotal = 0, itbis = 0;
       `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_emision, referencia_id, numero_factura, operador_id)
        VALUES ($1, $2, 'NC', $3, 'nota_credito', $4, $5, $6, $7, NOW(), $8, $9, $10) RETURNING *`,
       [tenant_id, facturaOrig.rows[0].customer_id, nc_numero, subtotal, itbis, total,
-       motivo || `Nota de crédito por factura ${facturaOrig.rows[0].ncf}`, factura_id, numero_factura, req.user.operador_id || null]
+       motivo || `Nota de crÃ©dito por factura ${facturaOrig.rows[0].ncf}`, factura_id, numero_factura, req.user.operador_id || null]
     );
     const nota_id = nota.rows[0].id;
  for (const item of items) {
@@ -624,7 +624,7 @@ let subtotal = 0, itbis = 0;
             `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
              VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
             [tenant_id, inv.rows[0].id, item.cantidad, inv.rows[0].stock_actual, stockNuevo,
-             `Nota de crédito ${nc_numero}`]
+             `Nota de crÃ©dito ${nc_numero}`]
           );
         }
       }
@@ -809,7 +809,7 @@ for (const item of items) {
     }
 for (const item of items) {
       if (!item.product_id) continue
-      // EMPAQUES: si el artículo es hijo, el inventario vive en el padre y se descuenta
+      // EMPAQUES: si el artÃ­culo es hijo, el inventario vive en el padre y se descuenta
       // la cantidad multiplicada por su factor (ej: 1 caja = 1440 unidades base)
       const prodInfo = await client.query(
         'SELECT articulo_padre_id, factor_empaque, nombre FROM products WHERE id = $1 AND tenant_id = $2',
@@ -913,7 +913,7 @@ router.put('/:id/anular', verifyToken, tenantGuard, async (req, res) => {
     );
     if (!invoice.rows[0]) return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' });
     if (invoice.rows[0].estado === 'anulada') {
-      return res.status(400).json({ success: false, mensaje: 'La factura ya está anulada' });
+      return res.status(400).json({ success: false, mensaje: 'La factura ya estÃ¡ anulada' });
     }
     const updated = await pool.query(
       `UPDATE invoices SET estado='anulada', actualizado_en=NOW(), anulado_por=$2, anulado_en=NOW() WHERE id=$1 RETURNING *`,
@@ -1195,6 +1195,7 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
               c.direccion as cliente_direccion, c.condiciones as cliente_condiciones,
               c.email as cliente_negocio,
 t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
+             t.telefono as empresa_telefono, t.direccion as empresa_direccion, t.actividad as empresa_actividad,
               v.nombre as vendedor_nombre,
               ref.ncf as ref_ncf, ref.numero_factura as ref_numero_factura
        FROM invoices i
@@ -1255,11 +1256,14 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
 
     // FUNCION: Dibujar encabezado completo (primera pagina)
     const dibujarEncabezadoCompleto = () => {
-      doc.rect(0, 0, W, 65).fill(azulOscuro);
+      doc.rect(0, 0, W, 88).fill(azulOscuro);
       doc.fillColor('white').fontSize(18).font('Helvetica-Bold')
          .text(data.empresa_nombre || 'MI EMPRESA', M, 14, { width: col / 2 });
       doc.fontSize(8).font('Helvetica')
          .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 38, { width: col / 2 });
+      if (data.empresa_telefono) doc.fontSize(8).text('Tel: ' + data.empresa_telefono, M, 61, { width: col / 2 });
+      if (data.empresa_direccion) doc.fontSize(7).text(data.empresa_direccion, M, 72, { width: col / 2 - 10 });
+      if (data.empresa_actividad) { doc.fontSize(8).font('Helvetica-Oblique').text(data.empresa_actividad, M, 44, { width: col, align: 'center' }); doc.font('Helvetica'); }
       doc.fontSize(8).text(data.empresa_email || '', M, 50, { width: col / 2 });
       const rightX = M + col / 2;
       const rightW = col / 2;
@@ -1268,9 +1272,9 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
       doc.fontSize(9).font('Helvetica')
          .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 32, { width: rightW, align: 'right' });
       doc.fontSize(8).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 44, { width: rightW, align: 'right' });
-      doc.fontSize(8).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 54, { width: rightW, align: 'right' });
+      doc.fontSize(8).text('Fecha: ' + (data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')), rightX, 54, { width: rightW, align: 'right' });
+      let y = 95;
 
-      let y = 72;
       if (data.numero_factura) {
         doc.rect(M, y, col, 16).fill(azulMedio);
         doc.fillColor('white').fontSize(9).font('Helvetica-Bold')
@@ -1357,6 +1361,14 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
       doc.dash(4, { space: 3 });
       doc.moveTo(M, LIMITE_MITAD).lineTo(M + col, LIMITE_MITAD).strokeColor(grisBorde).lineWidth(0.8).stroke();
       doc.undash();
+      const fy = LIMITE_MITAD - 26;
+      const fw = (col - 40) / 2;
+      doc.strokeColor(grisBorde).lineWidth(0.6);
+      doc.moveTo(M, fy).lineTo(M + fw, fy).stroke();
+      doc.moveTo(M + col - fw, fy).lineTo(M + col, fy).stroke();
+      doc.fillColor(grisTexto).fontSize(7).font('Helvetica');
+      doc.text('Entregado por', M, fy + 3, { width: fw, align: 'center' });
+      doc.text('Recibido por', M + col - fw, fy + 3, { width: fw, align: 'center' });
       doc.restore();
       doc.fillColor(grisTexto).fontSize(7).font('Helvetica')
          .text('  CORTAR AQUI  ', M + col / 2 - 35, LIMITE_MITAD - 4, { width: 70, align: 'center' });
@@ -1454,7 +1466,7 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
 });
 
 
-// PDF CARTA ENTERA - DISEÑO COMPACTO PROFESIONAL
+// PDF CARTA ENTERA - DISEÃ‘O COMPACTO PROFESIONAL
 router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
@@ -1463,7 +1475,8 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
       `SELECT i.*, c.nombre as cliente_nombre, c.rnc_cedula, c.telefono as cliente_telefono,
               c.direccion as cliente_direccion, c.condiciones as cliente_condiciones,
               c.email as cliente_negocio,
-              t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
+             t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
+              t.telefono as empresa_telefono, t.direccion as empresa_direccion, t.actividad as empresa_actividad,
   v.nombre as vendedor_nombre,
               ref.ncf as ref_ncf, ref.numero_factura as ref_numero_factura
        FROM invoices i
@@ -1508,29 +1521,36 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
     const grisTexto = '#64748B';
 
     // ENCABEZADO
-    doc.rect(0, 0, W, 95).fill(azulOscuro);
+    doc.rect(0, 0, W, 112).fill(azulOscuro);
     doc.fillColor('white').fontSize(22).font('Helvetica-Bold')
        .text(data.empresa_nombre || 'MI EMPRESA', M, 25, { width: col / 2 });
     doc.fontSize(9).font('Helvetica')
        .text(`RNC: ${data.empresa_rnc || 'N/A'}`, M, 56, { width: col / 2 });
-    doc.fontSize(9).text(data.empresa_email || '', M, 70, { width: col / 2 });
+   doc.fontSize(9).text(data.empresa_email || '', M, 68, { width: col / 2 });
+    if (data.empresa_telefono) doc.fontSize(9).text(`Tel: ${data.empresa_telefono}`, M, 80, { width: col / 2 });
+    if (data.empresa_direccion) doc.fontSize(8).text(data.empresa_direccion, M, 92, { width: col / 2 - 10 });
     const rightX = M + col / 2;
     const rightW = col / 2;
     doc.fillColor('white').fontSize(esElectronica ? 11 : 14).font('Helvetica-Bold')
+       doc.fillColor('white').fontSize(esElectronica ? 11 : 14).font('Helvetica-Bold')
        .text(tituloDocumento, rightX, 25, { width: rightW, align: 'right' });
+    if (data.empresa_actividad) {
+      doc.fontSize(9).font('Helvetica-Oblique')
+         .text(data.empresa_actividad, M, 56, { width: col, align: 'center' });
+    }
     doc.fontSize(10).font('Helvetica')
-       .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 46, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 60, { width: rightW, align: 'right' });
-    doc.fontSize(9).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 74, { width: rightW, align: 'right' });
+       .text(`NCF: ${data.ncf || 'N/A'}`, rightX, 60, { width: rightW, align: 'right' });
+    doc.fontSize(9).text(`Estado: ${data.estado.toUpperCase()}`, rightX, 76, { width: rightW, align: 'right' });
+    doc.fontSize(9).text(`Fecha: ${data.fecha_emision ? new Date(data.fecha_emision).toLocaleDateString('es-DO') : new Date().toLocaleDateString('es-DO')}`, rightX, 92, { width: rightW, align: 'right' });
 
-    let y = 105;
+    let y = 122;
     if (data.numero_factura) {
       doc.rect(M, y, col, 22).fill(azulMedio);
       doc.fillColor('white').fontSize(10).font('Helvetica-Bold')
          .text(data.estado === 'nota_credito' ? `FACTURA No.: ${data.ref_ncf || (data.ref_numero_factura ? String(data.ref_numero_factura).padStart(8, '0') : '-')}` : `FACTURA No.: ${String(data.numero_factura).padStart(8, '0')}`, M + 10, y + 7, { width: col - 20, align: 'right' })
       y += 32;
     } else {
-      y = 115;
+      y = 132;
     }
 
     // BLOQUES CLIENTE / CONDICIONES
@@ -1687,6 +1707,15 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
          .text('Representacion Impresa del e-CF (Comprobante Fiscal Electronico)', M, y, { width: col, align: 'center' });
       y += 16;
     }
+    y += 34;
+    const fwC = (col - 60) / 2;
+    doc.strokeColor(grisBorde).lineWidth(0.6);
+    doc.moveTo(M, y).lineTo(M + fwC, y).stroke();
+    doc.moveTo(M + col - fwC, y).lineTo(M + col, y).stroke();
+    doc.fillColor(grisTexto).fontSize(8).font('Helvetica');
+    doc.text('Entregado por', M, y + 4, { width: fwC, align: 'center' });
+    doc.text('Recibido por', M + col - fwC, y + 4, { width: fwC, align: 'center' });
+    y += 24;
 
     // FOOTER
     doc.moveTo(M, y).lineTo(M + col, y).strokeColor(grisBorde).lineWidth(0.5).stroke();
