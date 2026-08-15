@@ -186,12 +186,17 @@ router.get('/pendientes', verifyToken, tenantGuard, async (req, res) => {
     const { fecha_inicio, fecha_fin, vendedor } = req.query;
 
     let query = `
-      SELECT p.*, i.ncf, i.total as invoice_total, c.nombre as cliente_nombre
+  SELECT p.*,
+             COALESCE(i.ncf, cd.numero) as ncf,
+             COALESCE(i.total, cd.total) as invoice_total,
+             COALESCE(c.nombre, cc.nombre, cd.cliente_nombre) as cliente_nombre
       FROM payments p
-      JOIN invoices i ON p.invoice_id = i.id
+      LEFT JOIN invoices i ON p.invoice_id = i.id
       LEFT JOIN customers c ON i.customer_id = c.id
-      
+      LEFT JOIN conduces cd ON p.conduce_id = cd.id
+      LEFT JOIN customers cc ON cd.customer_id = cc.id
       WHERE p.tenant_id = $1 AND (p.estado = 'pendiente' OR p.estado IS NULL)
+        AND (p.invoice_id IS NOT NULL OR p.conduce_id IS NOT NULL)
     `;
     const params = [tenant_id];
 

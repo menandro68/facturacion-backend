@@ -790,11 +790,12 @@ const total = subtotal + itbis;
     const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
     const invoice = await client.query(
 `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id, monto_recibido, devuelta, descuento_monto)
-       VALUES ($1, $2, $3, $4, 'emitida', $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+      VALUES ($1, $2, $3, $4, $18, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
       [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null,
        monto_recibido !== undefined && monto_recibido !== null ? parseFloat(monto_recibido) : null,
        devuelta !== undefined && devuelta !== null ? parseFloat(devuelta) : null,
-       descuento_monto]
+  descuento_monto,
+       String(notas || '').startsWith('POS - Pago:') ? 'pagada' : 'emitida']
     );
     const invoice_id = invoice.rows[0].id;
 for (const item of items) {
