@@ -1,10 +1,21 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
 const QRCode = require('qrcode');
 const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
+
+// EMPAQUES: resuelve el articulo dueno del inventario y el factor de conversion
+async function resolverEmpaque(client, productId, tenantId) {
+  const q = await client.query(
+    'SELECT articulo_padre_id, factor_empaque FROM products WHERE id = $1 AND tenant_id = $2',
+    [productId, tenantId]
+  );
+  const padre = q.rows[0]?.articulo_padre_id || productId;
+  const f = parseFloat(q.rows[0]?.factor_empaque);
+  return { productoInventario: padre, factor: f > 0 ? f : 1 };
+}
 
 // ==========================================
 // Crear/reparar tablas
@@ -231,18 +242,20 @@ router.post('/', verifyToken, tenantGuard, async (req, res) => {
       );
 
       if (it.product_id) {
+        const emp = await resolverEmpaque(client, it.product_id, tenant_id);
+        const cantBase = cantidad * emp.factor;
         const inv = await client.query(
           'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
-          [it.product_id, tenant_id]
+          [emp.productoInventario, tenant_id]
         );
         if (inv.rows.length > 0) {
-          const stockNuevo = parseFloat(inv.rows[0].stock_actual) - cantidad;
+          const stockNuevo = parseFloat(inv.rows[0].stock_actual) - cantBase;
           await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
             [stockNuevo, inv.rows[0].id]);
           await client.query(
             `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
              VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
-            [tenant_id, inv.rows[0].id, cantidad, inv.rows[0].stock_actual, stockNuevo, `Conduce ${numeroTexto}`]
+            [tenant_id, inv.rows[0].id, cantBase, inv.rows[0].stock_actual, stockNuevo, `Conduce ${numeroTexto}`]
           );
         }
       }
@@ -646,13 +659,14 @@ router.post('/:id/nota-credito', verifyToken, tenantGuard, async (req, res) => {
         [ncId, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario || 0]
       );
       if (item.product_id) {
+        const empNc = await resolverEmpaque(client, item.product_id, tenant_id);
         const inv = await client.query(
           'SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2',
-          [item.product_id, tenant_id]
+          [empNc.productoInventario, tenant_id]
         );
         if (inv.rows.length > 0) {
           const stockActual = parseFloat(inv.rows[0].stock_actual);
-          const cantidad = parseFloat(item.cantidad);
+          const cantidad = parseFloat(item.cantidad) * empNc.factor;
           const stockNuevo = stockActual + cantidad;
           await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2',
             [stockNuevo, inv.rows[0].id]);
@@ -791,12 +805,14 @@ router.put('/:id/editar', verifyToken, tenantGuard, async (req, res) => {
     const itemsViejos = await client.query(`SELECT * FROM conduces_items WHERE conduce_id = $1`, [id]);
     for (const iv of itemsViejos.rows) {
       if (!iv.product_id) continue;
-      const invV = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [iv.product_id, tenant_id]);
+      const empV = await resolverEmpaque(client, iv.product_id, tenant_id);
+      const cantBaseV = parseFloat(iv.cantidad) * empV.factor;
+      const invV = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [empV.productoInventario, tenant_id]);
       if (invV.rows.length > 0) {
         const stockAntV = parseFloat(invV.rows[0].stock_actual);
-        const stockNuevoV = stockAntV + parseFloat(iv.cantidad);
+        const stockNuevoV = stockAntV + cantBaseV;
         await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoV, invV.rows[0].id]);
-        await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'entrada',$3,$4,$5,$6)`, [tenant_id, invV.rows[0].id, parseFloat(iv.cantidad), stockAntV, stockNuevoV, `Reversion por edicion de conduce ${cd.numero}`]);
+        await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'entrada',$3,$4,$5,$6)`, [tenant_id, invV.rows[0].id, cantBaseV, stockAntV, stockNuevoV, `Reversion por edicion de conduce ${cd.numero}`]);
       }
     }
     await client.query(`DELETE FROM conduces_items WHERE conduce_id = $1`, [id]);
@@ -821,12 +837,14 @@ router.put('/:id/editar', verifyToken, tenantGuard, async (req, res) => {
       totalEd += precioUnitEd * cantEd;
       await client.query(`INSERT INTO conduces_items (conduce_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate) VALUES ($1, $2, $3, $4, $5, $6)`, [id, it.product_id || null, it.descripcion || '', cantEd, precioUnitEd, itbisRateEd]);
       if (it.product_id) {
-        const invEd = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [it.product_id, tenant_id]);
+        const empEd = await resolverEmpaque(client, it.product_id, tenant_id);
+        const cantBaseEd = cantEd * empEd.factor;
+        const invEd = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [empEd.productoInventario, tenant_id]);
         if (invEd.rows.length > 0) {
           const stockAntEd = parseFloat(invEd.rows[0].stock_actual);
-          const stockNuevoEd = stockAntEd - cantEd;
+          const stockNuevoEd = stockAntEd - cantBaseEd;
           await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoEd, invEd.rows[0].id]);
-          await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'salida',$3,$4,$5,$6)`, [tenant_id, invEd.rows[0].id, cantEd, stockAntEd, stockNuevoEd, `Conduce ${cd.numero} (editado)`]);
+          await client.query(`INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo) VALUES ($1,$2,'salida',$3,$4,$5,$6)`, [tenant_id, invEd.rows[0].id, cantBaseEd, stockAntEd, stockNuevoEd, `Conduce ${cd.numero} (editado)`]);
         }
       }
     }

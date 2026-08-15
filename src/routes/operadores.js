@@ -331,6 +331,18 @@ const pedidos = await pool.query(`
         AND ($3::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
         AND ($4::date IS NULL OR (creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
     `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
+    // 7.1 Detalle de devoluciones registradas por este operador
+    const detalleDevoluciones = await pool.query(`
+      SELECT d.id, d.numero, d.factura_ncf, d.total, d.estado, d.motivo, d.creado_en,
+             COALESCE(d.cliente_nombre, cu.nombre) as cliente_nombre
+      FROM devoluciones d
+      LEFT JOIN customers cu ON d.customer_id = cu.id
+      WHERE d.tenant_id = $1
+        AND d.operador_id = $2
+        AND ($3::date IS NULL OR (d.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date >= $3::date)
+        AND ($4::date IS NULL OR (d.creado_en AT TIME ZONE 'UTC' AT TIME ZONE 'America/Santo_Domingo')::date <= $4::date)
+      ORDER BY d.creado_en DESC
+    `, [tenant_id, operador_id, fechaDesde, fechaHasta]);
     // 8. KPIs - Conduces creados por este operador
     const conduces = await pool.query(`
       SELECT COUNT(*)::int as cantidad, COALESCE(SUM(total), 0)::numeric as monto
@@ -462,6 +474,7 @@ const pedidos = await pool.query(`
         },
    detalle_facturas: detalleFacturas.rows,
         detalle_conduces: detalleConduces.rows,
+        detalle_devoluciones: detalleDevoluciones.rows,
         detalle_pagos: detallePagos.rows,
         registro_actividad: actividad.rows
       }
