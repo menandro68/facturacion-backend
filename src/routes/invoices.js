@@ -1906,6 +1906,92 @@ for (const item of items) {
 });
 
 // PUT - Convertir cotizacion a factura
+router.put('/cotizacion/:id/convertir-conduce', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    await client.query('BEGIN');
+    const cotQ = await client.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2 AND estado='cotizacion'`,
+      [id, tenant_id]
+    );
+    if (!cotQ.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, mensaje: 'Cotizacion no encontrada' });
+    }
+    const cot = cotQ.rows[0];
+    const itemsQ = await client.query(`SELECT * FROM invoice_items WHERE invoice_id=$1`, [id]);
+    if (itemsQ.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'La cotizacion no tiene articulos' });
+    }
+    let clienteNombreCt = null;
+    if (cot.customer_id) {
+      const cliQ = await client.query(`SELECT nombre FROM customers WHERE id=$1 AND tenant_id=$2`, [cot.customer_id, tenant_id]);
+      if (cliQ.rows[0]) clienteNombreCt = cliQ.rows[0].nombre;
+    }
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1 || '-conduce'))`, [tenant_id]);
+    const maxQ = await client.query(
+      `SELECT COALESCE(MAX(numero_conduce), 0) as maximo FROM conduces WHERE tenant_id=$1`,
+      [tenant_id]
+    );
+    const numeroConduceCt = parseInt(maxQ.rows[0].maximo) + 1;
+    const numeroTextoCt = 'CD-' + String(numeroConduceCt).padStart(4, '0');
+    const conduceCt = await client.query(
+      `INSERT INTO conduces (tenant_id, numero_conduce, numero, customer_id, cliente_nombre, chofer_id, chofer_nombre, notas, estado, operador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'emitido', $9) RETURNING *`,
+      [tenant_id, numeroConduceCt, numeroTextoCt, cot.customer_id || null, clienteNombreCt,
+       null, null, `Generado desde cotizacion`, req.user.operador_id || null]
+    );
+    const conduceIdCt = conduceCt.rows[0].id;
+    let totalConduceCt = 0;
+    for (const it of itemsQ.rows) {
+      const cantidad = parseFloat(it.cantidad) || 0;
+      const precioUnit = parseFloat(it.precio_unitario) || 0;
+      const rate = parseFloat(it.itbis_rate) || 0;
+      totalConduceCt += precioUnit * cantidad;
+      await client.query(
+        `INSERT INTO conduces_items (conduce_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [conduceIdCt, it.product_id || null, it.descripcion || '', cantidad, precioUnit, rate]
+      );
+      if (it.product_id) {
+        const empCT = await client.query(
+          'SELECT articulo_padre_id, factor_empaque FROM products WHERE id = $1 AND tenant_id = $2',
+          [it.product_id, tenant_id]
+        );
+        const prodInvCT = empCT.rows[0]?.articulo_padre_id || it.product_id;
+        const fCT = parseFloat(empCT.rows[0]?.factor_empaque);
+        const cantBaseCT = cantidad * (fCT > 0 ? fCT : 1);
+        const invCT = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [prodInvCT, tenant_id]);
+        if (invCT.rows.length > 0) {
+          const stockAntCT = parseFloat(invCT.rows[0].stock_actual);
+          const stockNuevoCT = stockAntCT - cantBaseCT;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevoCT, invCT.rows[0].id]);
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
+            [tenant_id, invCT.rows[0].id, cantBaseCT, stockAntCT, stockNuevoCT, `Conduce ${numeroTextoCt} (Cotizacion)`]
+          );
+        }
+      }
+    }
+    await client.query(`UPDATE conduces SET total=$1, inventario_rebajado=true WHERE id=$2`, [totalConduceCt, conduceIdCt]);
+    await client.query(
+      `UPDATE invoices SET estado='convertido_conduce', actualizado_en=NOW() WHERE id=$1 AND tenant_id=$2`,
+      [id, tenant_id]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, data: { ...conduceCt.rows[0], total: totalConduceCt } });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 router.put('/cotizacion/:id/convertir', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
