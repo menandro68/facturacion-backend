@@ -9,6 +9,16 @@ const bwipjs = require('bwip-js');
 const { obtenerProximoNumeroFactura } = require('../helpers/numeroFactura');
 const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
 
+// TIPO DE ENTREGA: el vendedor indica si el pedido se despacha como factura o como conduce
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(20) DEFAULT 'factura'`);
+    console.log('Columna tipo_entrega lista');
+  } catch (e) {
+    console.error('Error columna tipo_entrega:', e.message);
+  }
+})();
+
 // Helper: generar QR con la ubicacion del cliente (link a Google Maps)
 async function generarQRUbicacion(direccion) {
   try {
@@ -24,13 +34,25 @@ router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const result = await pool.query(
-      `SELECT ii.invoice_id, ii.product_id, ii.descripcion, ii.cantidad, 
-              ii.precio_unitario, ii.subtotal, ii.total,
+    `SELECT ii.invoice_id, ii.product_id, ii.descripcion, ii.cantidad, 
+              ii.precio_unitario, ii.subtotal,
+              CASE WHEN COALESCE(ii.total, 0) > 0 THEN ii.total
+                   ELSE COALESCE(ii.cantidad, 0) * COALESCE(ii.precio_unitario, 0) END as total,
               COALESCE(p.comision_vendedor, 0) as comision_vendedor
        FROM invoice_items ii
        LEFT JOIN products p ON ii.product_id = p.id
        INNER JOIN invoices i ON ii.invoice_id = i.id
-       WHERE i.tenant_id = $1`,
+       WHERE i.tenant_id = $1
+       UNION ALL
+       SELECT ci.conduce_id as invoice_id, ci.product_id, ci.descripcion, ci.cantidad,
+              ci.precio_unitario,
+              (ci.cantidad * ci.precio_unitario) / (1 + COALESCE(ci.itbis_rate,0)/100) as subtotal,
+              (ci.cantidad * ci.precio_unitario) as total,
+              COALESCE(pc.comision_vendedor, 0) as comision_vendedor
+       FROM conduces_items ci
+       LEFT JOIN products pc ON ci.product_id = pc.id
+       INNER JOIN conduces c ON ci.conduce_id = c.id
+       WHERE c.tenant_id = $1`,
       [tenant_id]
     );
     res.json({ success: true, data: result.rows });
@@ -261,7 +283,7 @@ router.post('/pedido', verifyToken, tenantGuard, async (req, res) => {
   const client = await pool.connect();
   try {
     const { tenant_id } = req.user;
-    const { customer_id, items, notas } = req.body;
+const { customer_id, items, notas, tipo_entrega } = req.body;
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, mensaje: 'El pedido debe tener al menos un item' });
     }
@@ -275,9 +297,10 @@ let subtotal = 0, itbis = 0;
     }
     const total = subtotal + itbis;
 const pedido = await client.query(
-      `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, operador_id, operador_creador_id)
-       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW(), $7, $7) RETURNING *`,
-      [tenant_id, customer_id || null, subtotal, itbis, total, notas || null, req.user.operador_id || null]
+     `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, estado, subtotal, itbis, total, notas, fecha_emision, operador_id, operador_creador_id, tipo_entrega)
+       VALUES ($1, $2, 'B01', 'pedido', $3, $4, $5, $6, NOW(), $7, $7, $8) RETURNING *`,
+      [tenant_id, customer_id || null, subtotal, itbis, total, notas || null, req.user.operador_id || null,
+       tipo_entrega === 'conduce' ? 'conduce' : 'factura']
     );
     const pedido_id = pedido.rows[0].id;
 for (const item of items) {
@@ -480,16 +503,24 @@ router.put('/pedido/:id/convertir-conduce', verifyToken, tenantGuard, async (req
         [conduceId, it.product_id || null, it.descripcion || '', cantidad, precioUnit, rate]
       );
 
-      if (it.product_id) {
-        const inv = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [it.product_id, tenant_id]);
+  if (it.product_id) {
+        const empPC = await client.query(
+          'SELECT articulo_padre_id, factor_empaque FROM products WHERE id = $1 AND tenant_id = $2',
+          [it.product_id, tenant_id]
+        );
+        const prodInvPC = empPC.rows[0]?.articulo_padre_id || it.product_id;
+        const fPC = parseFloat(empPC.rows[0]?.factor_empaque);
+        const factorPC = fPC > 0 ? fPC : 1;
+        const cantBasePC = cantidad * factorPC;
+        const inv = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [prodInvPC, tenant_id]);
         if (inv.rows.length > 0) {
           const stockAnt = parseFloat(inv.rows[0].stock_actual);
-          const stockNuevo = stockAnt - cantidad;
+          const stockNuevo = stockAnt - cantBasePC;
           await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [stockNuevo, inv.rows[0].id]);
           await client.query(
             `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
              VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
-            [tenant_id, inv.rows[0].id, cantidad, stockAnt, stockNuevo, `Conduce ${numeroTexto} (Pedido)`]
+            [tenant_id, inv.rows[0].id, cantBasePC, stockAnt, stockNuevo, `Conduce ${numeroTexto} (Pedido)`]
           );
         }
       }
