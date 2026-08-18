@@ -5,6 +5,48 @@ const verifyToken = require('../middleware/auth');
 const tenantGuard = require('../middleware/tenantGuard');
 const logActividad = require('../utils/logActividad');
 
+// CAMBIO DE MERCANCIA (F8): documento interno, sin valor fiscal
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cambios_pos (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL,
+        numero VARCHAR(20),
+        numero_cambio INTEGER,
+        invoice_id UUID,
+        factura_ncf VARCHAR(20),
+        cliente_nombre VARCHAR(150),
+        total_devuelto DECIMAL(12,2) DEFAULT 0,
+        total_nuevo DECIMAL(12,2) DEFAULT 0,
+        diferencia DECIMAL(12,2) DEFAULT 0,
+        metodo_pago VARCHAR(30),
+        caja_id UUID,
+        operador_id UUID,
+        autorizado_por VARCHAR(150),
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cambios_pos_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        cambio_id UUID NOT NULL,
+        tipo VARCHAR(10) NOT NULL,
+        product_id UUID,
+        descripcion VARCHAR(255),
+        cantidad DECIMAL(12,2) DEFAULT 1,
+        precio_unitario DECIMAL(12,2) DEFAULT 0,
+        creado_en TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cambios_pos_tenant ON cambios_pos(tenant_id)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cambios_pos_items_cambio ON cambios_pos_items(cambio_id)`);
+    console.log('Tablas de cambios POS listas');
+  } catch (e) {
+    console.error('Error creando tablas cambios_pos:', e.message);
+  }
+})();
+
 // Crear tabla cajas si no existe (al cargar el módulo)
 (async () => {
   try {
@@ -89,14 +131,138 @@ async function calcularTotalesTurno(tenant_id, fechaApertura) {
     }
   }
 
+// CAMBIOS DE MERCANCIA: la diferencia cobrada tambien entra a caja
+  const camb = await pool.query(
+    `SELECT metodo_pago, COALESCE(SUM(diferencia),0) as total
+     FROM cambios_pos
+     WHERE tenant_id = $1 AND diferencia > 0 AND creado_en >= $2
+     GROUP BY metodo_pago`,
+    [tenant_id, fechaApertura]
+  );
+let total_cambios = 0;
+  for (const c of camb.rows) {
+    const m = parseFloat(c.total) || 0;
+    total_cambios += m;
+    if (c.metodo_pago === 'efectivo') total_efectivo += m;
+    else if (c.metodo_pago === 'tarjeta') total_tarjeta += m;
+    else if (c.metodo_pago === 'transferencia') total_transferencia += m;
+  }
   return {
     total_efectivo,
     total_tarjeta,
     total_transferencia,
+    total_cambios,
     total_ventas: total_efectivo + total_tarjeta + total_transferencia,
     cantidad_facturas: ventas.rows.length
   };
 }
+
+// POST /pos/cambio - Registrar cambio de mercancia (documento interno, sin NCF)
+router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { tenant_id } = req.user;
+    const { invoice_id, items_devueltos, items_nuevos, metodo_pago, autorizado_por } = req.body;
+    if (!invoice_id) return res.status(400).json({ success: false, mensaje: 'Falta la factura original' });
+    if (!Array.isArray(items_devueltos) || items_devueltos.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'Seleccione al menos un articulo a devolver' });
+    }
+    if (!Array.isArray(items_nuevos) || items_nuevos.length === 0) {
+      return res.status(400).json({ success: false, mensaje: 'Agregue al menos un articulo nuevo' });
+    }
+    await client.query('BEGIN');
+    const facQ = await client.query(
+      `SELECT * FROM invoices WHERE id=$1 AND tenant_id=$2`,
+      [invoice_id, tenant_id]
+    );
+    if (!facQ.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' }); }
+    const fac = facQ.rows[0];
+    if (fac.estado === 'anulada') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'La factura esta anulada' }); }
+    const dias = Math.floor((Date.now() - new Date(fac.creado_en).getTime()) / 86400000);
+    if (dias > 5) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: `El plazo para cambios es de 5 dias. Esta factura tiene ${dias} dias.` }); }
+    let totalDev = 0, totalNue = 0;
+    for (const it of items_devueltos) totalDev += (parseFloat(it.cantidad) || 0) * (parseFloat(it.precio_unitario) || 0);
+    for (const it of items_nuevos) totalNue += (parseFloat(it.cantidad) || 0) * (parseFloat(it.precio_unitario) || 0);
+    if (totalNue < totalDev - 0.01) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: 'La mercancia nueva debe costar igual o mas que la devuelta.' });
+    }
+    const diferencia = totalNue - totalDev;
+    const cajaQ = await client.query(`SELECT id FROM cajas WHERE tenant_id=$1 AND estado='abierta' LIMIT 1`, [tenant_id]);
+    const cajaId = cajaQ.rows[0]?.id || null;
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1 || '-cambio'))`, [tenant_id]);
+    const maxQ = await client.query(`SELECT COALESCE(MAX(numero_cambio),0) as maximo FROM cambios_pos WHERE tenant_id=$1`, [tenant_id]);
+    const numCambio = parseInt(maxQ.rows[0].maximo) + 1;
+    const numTexto = 'CB-' + String(numCambio).padStart(4, '0');
+    const cambio = await client.query(
+      `INSERT INTO cambios_pos (tenant_id, numero, numero_cambio, invoice_id, factura_ncf, cliente_nombre,
+        total_devuelto, total_nuevo, diferencia, metodo_pago, caja_id, operador_id, autorizado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [tenant_id, numTexto, numCambio, invoice_id, fac.ncf || null, fac.cliente_nombre || 'Consumidor Final',
+       totalDev, totalNue, diferencia, diferencia > 0 ? (metodo_pago || 'efectivo') : null,
+       cajaId, req.user.operador_id || null, autorizado_por || null]
+    );
+    const cambioId = cambio.rows[0].id;
+    for (const it of items_devueltos) {
+      const cant = parseFloat(it.cantidad) || 0;
+      await client.query(
+        `INSERT INTO cambios_pos_items (cambio_id, tipo, product_id, descripcion, cantidad, precio_unitario)
+         VALUES ($1,'devuelto',$2,$3,$4,$5)`,
+        [cambioId, it.product_id || null, it.descripcion || '', cant, parseFloat(it.precio_unitario) || 0]
+      );
+      if (it.product_id) {
+        const empD = await client.query('SELECT articulo_padre_id, factor_empaque FROM products WHERE id=$1 AND tenant_id=$2', [it.product_id, tenant_id]);
+        const prodD = empD.rows[0]?.articulo_padre_id || it.product_id;
+        const fD = parseFloat(empD.rows[0]?.factor_empaque);
+        const baseD = cant * (fD > 0 ? fD : 1);
+        const invD = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [prodD, tenant_id]);
+        if (invD.rows.length > 0) {
+          const antD = parseFloat(invD.rows[0].stock_actual);
+          const nuevoD = antD + baseD;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [nuevoD, invD.rows[0].id]);
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'entrada',$3,$4,$5,$6)`,
+            [tenant_id, invD.rows[0].id, baseD, antD, nuevoD, `Cambio ${numTexto} (devuelto)`]
+          );
+        }
+      }
+    }
+    for (const it of items_nuevos) {
+      const cant = parseFloat(it.cantidad) || 0;
+      await client.query(
+        `INSERT INTO cambios_pos_items (cambio_id, tipo, product_id, descripcion, cantidad, precio_unitario)
+         VALUES ($1,'nuevo',$2,$3,$4,$5)`,
+        [cambioId, it.product_id || null, it.descripcion || '', cant, parseFloat(it.precio_unitario) || 0]
+      );
+      if (it.product_id) {
+        const empN = await client.query('SELECT articulo_padre_id, factor_empaque FROM products WHERE id=$1 AND tenant_id=$2', [it.product_id, tenant_id]);
+        const prodN = empN.rows[0]?.articulo_padre_id || it.product_id;
+        const fN = parseFloat(empN.rows[0]?.factor_empaque);
+        const baseN = cant * (fN > 0 ? fN : 1);
+        const invN = await client.query('SELECT * FROM inventory WHERE product_id=$1 AND tenant_id=$2', [prodN, tenant_id]);
+        if (invN.rows.length > 0) {
+          const antN = parseFloat(invN.rows[0].stock_actual);
+          const nuevoN = antN - baseN;
+          await client.query('UPDATE inventory SET stock_actual=$1, actualizado_en=NOW() WHERE id=$2', [nuevoN, invN.rows[0].id]);
+          await client.query(
+            `INSERT INTO inventory_movements (tenant_id,inventory_id,tipo,cantidad,stock_anterior,stock_nuevo,motivo)
+             VALUES ($1,$2,'salida',$3,$4,$5,$6)`,
+            [tenant_id, invN.rows[0].id, baseN, antN, nuevoN, `Cambio ${numTexto} (entregado)`]
+          );
+        }
+      }
+    }
+    await client.query('COMMIT');
+    logActividad(req, 'pos', 'cambio', `Cambio ${numTexto} sobre ${fac.ncf || ''} - Diferencia RD$${diferencia.toFixed(2)}`, cambioId);
+    res.status(201).json({ success: true, data: { ...cambio.rows[0], total_devuelto: totalDev, total_nuevo: totalNue, diferencia } });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ success: false, mensaje: error.message });
+  } finally {
+    client.release();
+  }
+});
 
 // GET /pos/caja/actual - Consultar si hay caja abierta
 router.get('/caja/actual', verifyToken, tenantGuard, async (req, res) => {
@@ -161,7 +327,7 @@ router.get('/caja/resumen', verifyToken, tenantGuard, async (req, res) => {
     }
     const cajaActual = caja.rows[0];
 
-    const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas } =
+    const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas, total_cambios } =
       await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura);
     const efectivo_esperado = parseFloat(cajaActual.monto_apertura) + total_efectivo;
 
@@ -173,6 +339,8 @@ router.get('/caja/resumen', verifyToken, tenantGuard, async (req, res) => {
         total_tarjeta,
         total_transferencia,
         total_ventas,
+total_ventas,
+        total_cambios,
         cantidad_facturas,
         efectivo_esperado
       }
@@ -198,7 +366,7 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
     }
     const cajaActual = caja.rows[0];
 
-    const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas } =
+  const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas, total_cambios } =
       await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura);
     const efectivo_esperado = parseFloat(cajaActual.monto_apertura) + total_efectivo;
 
@@ -228,7 +396,7 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
 
     logActividad(req, 'pos', 'cerrar_caja', `Cerró caja. Ventas: RD$ ${total_ventas.toFixed(2)} (${cantidad_facturas} facturas)`, cajaActual.id);
 
-    res.json({ success: true, data: result.rows[0] });
+ res.json({ success: true, data: { ...result.rows[0], total_cambios } });
   } catch (err) {
     console.error('Error cerrando caja:', err);
     res.status(500).json({ success: false, mensaje: 'Error cerrando caja' });

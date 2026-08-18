@@ -1185,6 +1185,10 @@ y += 4;
     }
     lineaGuiones();
     y += 2;
+    if (req.query.reimpreso === '1') {
+      centrado('** REIMPRESO **', 9, true);
+      y += 3;
+    }
     centrado('GRACIAS POR SU COMPRA', 9, true);
     y += 2;
     centrado('Este documento es valido como', 7);
