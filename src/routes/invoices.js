@@ -822,7 +822,7 @@ const total = subtotal + itbis;
     const invoice = await client.query(
 `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id, monto_recibido, devuelta, descuento_monto)
       VALUES ($1, $2, $3, $4, $18, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || null,
+      [tenant_id, customer_id || null, ncf_tipo || 'B01', ncf, subtotal, itbis, total, notas || null, fecha_vencimiento || null, codigo_seguridad, fecha_vencimiento_encf, codigo_seguridad ? new Date() : null, numero_factura, req.user.operador_id || req.user.cajero_id || null,
        monto_recibido !== undefined && monto_recibido !== null ? parseFloat(monto_recibido) : null,
        devuelta !== undefined && devuelta !== null ? parseFloat(devuelta) : null,
   descuento_monto,
@@ -967,12 +967,15 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
               c.direccion as cliente_direccion,
               t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.telefono as empresa_telefono,
               t.direccion as empresa_direccion,
-     v.nombre as vendedor_nombre,
+       v.nombre as vendedor_nombre,
+              COALESCE(cj.nombre, op.nombre) as cajero_nombre,
               ref.ncf as ref_ncf, ref.numero_factura as ref_numero_factura
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        LEFT JOIN tenants t ON i.tenant_id = t.id
        LEFT JOIN vendedores v ON c.vendedor_id = v.id
+       LEFT JOIN cajeros cj ON i.operador_id = cj.id
+       LEFT JOIN operadores op ON i.operador_id = op.id
        LEFT JOIN invoices ref ON i.referencia_id = ref.id
        WHERE i.id=$1 AND i.tenant_id=$2`,
       [id, tenant_id]
@@ -1128,7 +1131,11 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
      const numeroFormateado = data.estado === 'nota_credito'
         ? (data.ref_ncf || (data.ref_numero_factura ? String(data.ref_numero_factura).padStart(8, '0') : '-'))
         : String(data.numero_factura).padStart(8, '0');
-      izquierda(`Factura No.: ${numeroFormateado}`, 9, true);
+        izquierda(`Factura No.: ${numeroFormateado}`, 9, true);
+      if (data.cajero_nombre) {
+        y += 1;
+        izquierda(`ATENDIDO POR: ${data.cajero_nombre}`, 8);
+      }
       y += 3;
       lineaGuiones();
     }

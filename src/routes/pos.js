@@ -279,6 +279,31 @@ router.get('/caja/actual', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET /pos/ultima-factura - Ultima factura emitida en la caja abierta
+router.get('/ultima-factura', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const caja = await pool.query(
+      `SELECT fecha_apertura FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1`,
+      [tenant_id]
+    );
+    if (caja.rows.length === 0) {
+      return res.json({ success: true, data: null });
+    }
+    const result = await pool.query(
+      `SELECT id, ncf, numero_factura, total FROM invoices
+       WHERE tenant_id = $1 AND fecha_emision >= $2 AND estado != 'anulada'
+       AND notas LIKE 'POS - Pago:%'
+       ORDER BY fecha_emision DESC LIMIT 1`,
+      [tenant_id, caja.rows[0].fecha_apertura]
+    );
+    res.json({ success: true, data: result.rows[0] || null });
+  } catch (err) {
+    console.error('Error consultando ultima factura:', err);
+    res.status(500).json({ success: false, mensaje: 'Error consultando ultima factura' });
+  }
+});
+
 // POST /pos/caja/abrir - Abrir caja con monto inicial
 router.post('/caja/abrir', verifyToken, tenantGuard, async (req, res) => {
   try {
