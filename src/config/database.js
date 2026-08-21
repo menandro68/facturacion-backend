@@ -165,6 +165,7 @@ const createTables = async () => {
       )
     `);
     console.log('✅ Tabla invoice_items creada');
+    await pool.query(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS precio_original DECIMAL(12,2)`);
 
     // 10. Tabla payments
     await pool.query(`
@@ -617,7 +618,14 @@ const createTables = async () => {
       ALTER TABLE invoices
       ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL
     `);
-    console.log('✅ Columna chofer_id agregada a invoices');
+        console.log('✅ Columna chofer_id agregada a invoices');
+
+    // Caja del POS a la que pertenece la factura (cuadre independiente por cajero)
+    await pool.query(`
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS caja_id UUID;
+      CREATE INDEX IF NOT EXISTS idx_invoices_caja ON invoices(caja_id);
+    `);
+    console.log('✅ Columna caja_id agregada a invoices');
 
     console.log('🎉 Base de datos lista');
   } catch (error) {

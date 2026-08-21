@@ -818,7 +818,13 @@ const total = subtotal + itbis;
         ncf = `${tipoTradicional}${String(nueva_secuencia).padStart(8, '0')}`;
       }
     }
-    const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
+      const numero_factura = await obtenerProximoNumeroFactura(client, tenant_id);
+    let caja_id_venta = null;
+    if (String(notas || '').startsWith('POS - Pago:')) {
+            const idCaj = req.user.cajero_id || req.user.operador_id || req.user.id || null;
+      const cq = await client.query(`SELECT id FROM cajas WHERE tenant_id=$1 AND estado='abierta' AND operador_id IS NOT DISTINCT FROM $2 ORDER BY fecha_apertura DESC LIMIT 1`, [tenant_id, idCaj]);
+      caja_id_venta = cq.rows[0]?.id || null;
+    }
     const invoice = await client.query(
 `INSERT INTO invoices (tenant_id, customer_id, ncf_tipo, ncf, estado, subtotal, itbis, total, notas, fecha_vencimiento, fecha_emision, codigo_seguridad, fecha_vencimiento_encf, fecha_firma_digital, numero_factura, operador_id, monto_recibido, devuelta, descuento_monto)
       VALUES ($1, $2, $3, $4, $18, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
@@ -826,17 +832,21 @@ const total = subtotal + itbis;
        monto_recibido !== undefined && monto_recibido !== null ? parseFloat(monto_recibido) : null,
        devuelta !== undefined && devuelta !== null ? parseFloat(devuelta) : null,
   descuento_monto,
-       String(notas || '').startsWith('POS - Pago:') ? 'pagada' : 'emitida']
+          String(notas || '').startsWith('POS - Pago:') ? 'pagada' : 'emitida']
     );
+    if (caja_id_venta) {
+      await client.query(`UPDATE invoices SET caja_id=$1 WHERE id=$2`, [caja_id_venta, invoice.rows[0].id]);
+    }
     const invoice_id = invoice.rows[0].id;
 for (const item of items) {
       const item_bruto = item.cantidad * item.precio_unitario;
       const item_base = item_bruto / (1 + ((item.itbis_rate || 0) / 100));
       const item_itbis = item_bruto - item_base;
       await client.query(
-        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, item_base, item_bruto]
+        `INSERT INTO invoice_items (invoice_id, product_id, descripcion, cantidad, precio_unitario, itbis_rate, itbis_monto, subtotal, total, precio_original)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [invoice_id, item.product_id || null, item.descripcion, item.cantidad, item.precio_unitario, item.itbis_rate || 18, item_itbis, item_base, item_bruto,
+         item.precio_original !== undefined && item.precio_original !== null ? parseFloat(item.precio_original) : parseFloat(item.precio_unitario)]
       );
     }
 for (const item of items) {
@@ -1060,7 +1070,7 @@ router.get('/:id/pdf-pos', verifyToken, tenantGuard, async (req, res) => {
     lineaGuiones();
     items.rows.forEach(it => {
       const cant = parseFloat(it.cantidad);
-      const precio = parseFloat(it.precio_unitario);
+          const precio = parseFloat(it.precio_original || it.precio_unitario);
       const subtotalItem = cant * precio;
       doc.font('Helvetica').fontSize(8);
       doc.text(it.descripcion, M, y, { width: cw });

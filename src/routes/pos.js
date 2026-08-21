@@ -90,14 +90,25 @@ const logActividad = require('../utils/logActividad');
 
 // Calcula los totales del turno. Usa pos_pagos (desglose real, soporta pago mixto).
 // Si una factura no tiene desglose (ventas anteriores a esta función), cae al método de `notas`.
-async function calcularTotalesTurno(tenant_id, fechaApertura) {
+// Identifica al cajero/usuario logueado para que cada uno tenga su propia caja
+function idCajero(req) {
+  return req.user.cajero_id || req.user.operador_id || req.user.id || null;
+}
+
+async function calcularTotalesTurno(tenant_id, fechaApertura, cajaId) {
   const ventas = await pool.query(
-    `SELECT id, notas, total FROM invoices
-     WHERE tenant_id = $1
-       AND estado IN ('emitida', 'pagada')
-       AND notas LIKE 'POS - Pago:%'
-       AND fecha_emision >= $2`,
-    [tenant_id, fechaApertura]
+    cajaId
+      ? `SELECT id, notas, total FROM invoices
+         WHERE tenant_id = $1
+           AND estado IN ('emitida', 'pagada')
+           AND notas LIKE 'POS - Pago:%'
+           AND caja_id = $2`
+      : `SELECT id, notas, total FROM invoices
+         WHERE tenant_id = $1
+           AND estado IN ('emitida', 'pagada')
+           AND notas LIKE 'POS - Pago:%'
+           AND fecha_emision >= $2`,
+    [tenant_id, cajaId || fechaApertura]
   );
 
   const ids = ventas.rows.map(v => v.id);
@@ -135,9 +146,9 @@ async function calcularTotalesTurno(tenant_id, fechaApertura) {
   const camb = await pool.query(
     `SELECT metodo_pago, COALESCE(SUM(diferencia),0) as total
      FROM cambios_pos
-     WHERE tenant_id = $1 AND diferencia > 0 AND creado_en >= $2
+     WHERE tenant_id = $1 AND diferencia > 0 ${cajaId ? 'AND caja_id = $2' : 'AND creado_en >= $2'}
      GROUP BY metodo_pago`,
-    [tenant_id, fechaApertura]
+    [tenant_id, cajaId || fechaApertura]
   );
 let total_cambios = 0;
   for (const c of camb.rows) {
@@ -188,7 +199,7 @@ router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
       return res.status(400).json({ success: false, mensaje: 'La mercancia nueva debe costar igual o mas que la devuelta.' });
     }
     const diferencia = totalNue - totalDev;
-    const cajaQ = await client.query(`SELECT id FROM cajas WHERE tenant_id=$1 AND estado='abierta' LIMIT 1`, [tenant_id]);
+        const cajaQ = await client.query(`SELECT id FROM cajas WHERE tenant_id=$1 AND estado='abierta' AND operador_id IS NOT DISTINCT FROM $2 LIMIT 1`, [tenant_id, idCajero(req)]);
     const cajaId = cajaQ.rows[0]?.id || null;
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1 || '-cambio'))`, [tenant_id]);
     const maxQ = await client.query(`SELECT COALESCE(MAX(numero_cambio),0) as maximo FROM cambios_pos WHERE tenant_id=$1`, [tenant_id]);
@@ -264,13 +275,100 @@ router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
   }
 });
 
+// GET /pos/cambio/:id/ticket - Ticket 80mm del cambio de mercancia
+router.get('/cambio/:id/ticket', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    const camQ = await pool.query(
+      `SELECT c.*, t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.telefono as empresa_telefono, t.direccion as empresa_direccion
+       FROM cambios_pos c LEFT JOIN tenants t ON c.tenant_id = t.id
+       WHERE c.id=$1 AND c.tenant_id=$2`, [id, tenant_id]);
+    if (camQ.rows.length === 0) return res.status(404).json({ success: false, mensaje: 'Cambio no encontrado' });
+    const cam = camQ.rows[0];
+    const itemsQ = await pool.query(`SELECT * FROM cambios_pos_items WHERE cambio_id=$1 ORDER BY tipo DESC`, [id]);
+    const devueltos = itemsQ.rows.filter(i => i.tipo === 'devuelto');
+    const nuevos = itemsQ.rows.filter(i => i.tipo === 'nuevo');
+    const PDFDocument = require('pdfkit');
+    const W = 196, M = 6;
+    const doc = new PDFDocument({ margin: M, size: [W, 800] });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=cambio-${cam.numero}.pdf`);
+    doc.pipe(res);
+    let y = 10;
+    const fmtN = (n) => parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const centrado = (txt, size, bold) => {
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).text(txt, M, y, { width: W - M * 2, align: 'center' });
+      y += size + 2;
+    };
+    const izquierda = (txt, size, bold) => {
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).text(txt, M, y, { width: W - M * 2, align: 'left' });
+      y += size + 2;
+    };
+    const filaLR = (izq, der, size, bold) => {
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size);
+      doc.text(izq, M, y, { width: (W - M * 2) / 2, align: 'left' });
+      doc.text(der, M + (W - M * 2) / 2, y, { width: (W - M * 2) / 2, align: 'right' });
+      y += size + 2;
+    };
+    const lineaGuiones = () => {
+      doc.font('Helvetica').fontSize(7).text('-'.repeat(46), M, y, { width: W - M * 2, align: 'center' });
+      y += 8;
+    };
+    centrado(cam.empresa_nombre || '', 11, true);
+    if (cam.empresa_rnc) izquierda(`RNC: ${cam.empresa_rnc}`, 7);
+    if (cam.empresa_telefono) izquierda(`Tel: ${cam.empresa_telefono}`, 7);
+    if (cam.empresa_direccion) izquierda(cam.empresa_direccion, 7);
+    y += 3;
+    lineaGuiones();
+    centrado('CAMBIO DE MERCANCIA', 10, true);
+    izquierda(`No.: ${cam.numero}`, 8, true);
+    izquierda(`Factura: ${cam.factura_ncf || '-'}`, 8);
+    izquierda(`Fecha: ${new Date(cam.creado_en).toLocaleString('es-DO', { timeZone: 'America/Santo_Domingo' })}`, 7);
+    izquierda(`Cliente: ${cam.cliente_nombre || 'Consumidor Final'}`, 8);
+    y += 3;
+    lineaGuiones();
+    izquierda('DEVUELVE:', 8, true);
+    for (const it of devueltos) {
+      izquierda(it.descripcion || '', 7);
+      filaLR(`  ${fmtN(it.cantidad)} x ${fmtN(it.precio_unitario)}`, fmtN(it.cantidad * it.precio_unitario), 7);
+    }
+    y += 2;
+    izquierda('SE LLEVA:', 8, true);
+    for (const it of nuevos) {
+      izquierda(it.descripcion || '', 7);
+      filaLR(`  ${fmtN(it.cantidad)} x ${fmtN(it.precio_unitario)}`, fmtN(it.cantidad * it.precio_unitario), 7);
+    }
+    y += 3;
+    lineaGuiones();
+    filaLR('TOTAL DEVUELTO', fmtN(cam.total_devuelto), 8);
+    filaLR('TOTAL NUEVO', fmtN(cam.total_nuevo), 8);
+    filaLR('DIFERENCIA COBRADA', fmtN(cam.diferencia), 10, true);
+    if (parseFloat(cam.diferencia) > 0) {
+      filaLR('FORMA DE PAGO', (cam.metodo_pago || 'efectivo').toUpperCase(), 8);
+    }
+    y += 3;
+    lineaGuiones();
+    if (cam.autorizado_por) izquierda(`AUTORIZADO POR: ${cam.autorizado_por}`, 7);
+    y += 4;
+    centrado('DOCUMENTO INTERNO', 8, true);
+    centrado('Sin valor fiscal', 7);
+    y += 4;
+    centrado('GRACIAS POR SU COMPRA', 9, true);
+    doc.end();
+  } catch (error) {
+    console.error('Error ticket cambio:', error);
+    res.status(500).json({ success: false, mensaje: 'Error generando ticket' });
+  }
+});
+
 // GET /pos/caja/actual - Consultar si hay caja abierta
 router.get('/caja/actual', verifyToken, tenantGuard, async (req, res) => {
   try {
-    const { tenant_id } = req.user;
+     const { tenant_id } = req.user;
     const result = await pool.query(
-      `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1`,
-      [tenant_id]
+      `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' AND operador_id IS NOT DISTINCT FROM $2 ORDER BY fecha_apertura DESC LIMIT 1`,
+      [tenant_id, idCajero(req)]
     );
     res.json({ success: true, data: result.rows[0] || null });
   } catch (err) {
@@ -316,8 +414,8 @@ router.post('/caja/abrir', verifyToken, tenantGuard, async (req, res) => {
 
     // Verificar que no haya otra caja abierta
     const abierta = await pool.query(
-      `SELECT id FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' LIMIT 1`,
-      [tenant_id]
+          `SELECT id FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' AND operador_id IS NOT DISTINCT FROM $2 LIMIT 1`,
+      [tenant_id, idCajero(req)]
     );
     if (abierta.rows.length > 0) {
       return res.status(400).json({ success: false, mensaje: 'Ya existe una caja abierta. Debe cerrarla antes de abrir otra.' });
@@ -326,7 +424,7 @@ router.post('/caja/abrir', verifyToken, tenantGuard, async (req, res) => {
     const result = await pool.query(
       `INSERT INTO cajas (tenant_id, usuario_nombre, operador_id, monto_apertura, fecha_apertura, estado)
        VALUES ($1, $2, $3, $4, NOW(), 'abierta') RETURNING *`,
-      [tenant_id, usuario_nombre || null, req.user.operador_id || null, parseFloat(monto_apertura)]
+           [tenant_id, usuario_nombre || null, idCajero(req), parseFloat(monto_apertura)]
     );
 
     logActividad(req, 'pos', 'abrir_caja', `Abrió caja con RD$ ${parseFloat(monto_apertura).toFixed(2)}`, result.rows[0].id);
@@ -344,8 +442,8 @@ router.get('/caja/resumen', verifyToken, tenantGuard, async (req, res) => {
     const { tenant_id } = req.user;
 
     const caja = await pool.query(
-      `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1`,
-      [tenant_id]
+            `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' AND operador_id IS NOT DISTINCT FROM $2 ORDER BY fecha_apertura DESC LIMIT 1`,
+      [tenant_id, idCajero(req)]
     );
     if (caja.rows.length === 0) {
       return res.status(400).json({ success: false, mensaje: 'No hay caja abierta' });
@@ -353,7 +451,7 @@ router.get('/caja/resumen', verifyToken, tenantGuard, async (req, res) => {
     const cajaActual = caja.rows[0];
 
     const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas, total_cambios } =
-      await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura);
+            await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura, cajaActual.id);
     const efectivo_esperado = parseFloat(cajaActual.monto_apertura) + total_efectivo;
 
     res.json({
@@ -383,8 +481,8 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
     const { desglose_efectivo, efectivo_contado } = req.body;
 
     const caja = await pool.query(
-      `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' ORDER BY fecha_apertura DESC LIMIT 1`,
-      [tenant_id]
+              `SELECT * FROM cajas WHERE tenant_id = $1 AND estado = 'abierta' AND operador_id IS NOT DISTINCT FROM $2 ORDER BY fecha_apertura DESC LIMIT 1`,
+      [tenant_id, idCajero(req)]
     );
     if (caja.rows.length === 0) {
       return res.status(400).json({ success: false, mensaje: 'No hay caja abierta' });
@@ -392,7 +490,7 @@ router.post('/caja/cerrar', verifyToken, tenantGuard, async (req, res) => {
     const cajaActual = caja.rows[0];
 
   const { total_efectivo, total_tarjeta, total_transferencia, total_ventas, cantidad_facturas, total_cambios } =
-      await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura);
+           await calcularTotalesTurno(tenant_id, cajaActual.fecha_apertura, cajaActual.id);
     const efectivo_esperado = parseFloat(cajaActual.monto_apertura) + total_efectivo;
 
     // Cuadre de efectivo: lo que el cajero contó físicamente vs lo esperado
