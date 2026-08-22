@@ -14,6 +14,7 @@ function tipoNcfDesdeCliente(tipoCliente) {
   const mapa = {
     'credito_fiscal': 'B01',
     'consumidor_final': 'B02',
+    'e31_credito_fiscal_electronico': 'E31',
     'e32_consumo_electronico': 'E32'
   };
   return mapa[tipoCliente] || 'B02';

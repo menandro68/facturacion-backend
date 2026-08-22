@@ -343,9 +343,11 @@ router.get('/cambio/:id/ticket', verifyToken, tenantGuard, async (req, res) => {
     lineaGuiones();
     filaLR('TOTAL DEVUELTO', fmtN(cam.total_devuelto), 8);
     filaLR('TOTAL NUEVO', fmtN(cam.total_nuevo), 8);
-    filaLR('DIFERENCIA COBRADA', fmtN(cam.diferencia), 10, true);
+      filaLR('DIFERENCIA', fmtN(cam.diferencia), 10, true);
+    y += 4;
     if (parseFloat(cam.diferencia) > 0) {
       filaLR('FORMA DE PAGO', (cam.metodo_pago || 'efectivo').toUpperCase(), 8);
+      y += 2;
     }
     y += 3;
     lineaGuiones();

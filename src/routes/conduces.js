@@ -114,7 +114,8 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
     const result = await pool.query(
       `SELECT c.*,
               COALESCE(c.cliente_nombre, cu.nombre) as cliente_nombre,
-              COALESCE(c.chofer_nombre, ch.nombre) as chofer_nombre
+              COALESCE(c.chofer_nombre, ch.nombre) as chofer_nombre,
+              COALESCE((SELECT SUM(p.monto) FROM payments p WHERE p.conduce_id = c.id AND p.estado = 'confirmado'), 0) as monto_pagado
        FROM conduces c
        LEFT JOIN customers cu ON c.customer_id = cu.id
        LEFT JOIN choferes ch ON c.chofer_id = ch.id
