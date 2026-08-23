@@ -189,6 +189,11 @@ router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
     if (!facQ.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' }); }
     const fac = facQ.rows[0];
     if (fac.estado === 'anulada') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'La factura esta anulada' }); }
+       const yaCambio = await client.query(`SELECT numero FROM cambios_pos WHERE invoice_id=$1 AND tenant_id=$2 LIMIT 1`, [invoice_id, tenant_id]);
+    if (yaCambio.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, mensaje: `Esta factura ya tiene un cambio registrado (${yaCambio.rows[0].numero}). Solo se permite un cambio por factura.` });
+    }
     const dias = Math.floor((Date.now() - new Date(fac.creado_en).getTime()) / 86400000);
     if (dias > 5) { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: `El plazo para cambios es de 5 dias. Esta factura tiene ${dias} dias.` }); }
     let totalDev = 0, totalNue = 0;

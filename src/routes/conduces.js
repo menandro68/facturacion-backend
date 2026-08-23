@@ -115,7 +115,10 @@ router.get('/', verifyToken, tenantGuard, async (req, res) => {
       `SELECT c.*,
               COALESCE(c.cliente_nombre, cu.nombre) as cliente_nombre,
               COALESCE(c.chofer_nombre, ch.nombre) as chofer_nombre,
-              COALESCE((SELECT SUM(p.monto) FROM payments p WHERE p.conduce_id = c.id AND p.estado = 'confirmado'), 0) as monto_pagado
+                    COALESCE((SELECT SUM(p.monto) FROM payments p WHERE p.conduce_id = c.id AND p.estado = 'confirmado'), 0) as monto_pagado,
+              COALESCE((SELECT SUM(n.total) FROM conduces_nc n WHERE n.conduce_id = c.id AND n.estado = 'emitida'), 0) as nc_aplicada,
+              (SELECT STRING_AGG(n.numero, ', ') FROM conduces_nc n WHERE n.conduce_id = c.id AND n.estado = 'emitida') as nc_numeros,
+              (COALESCE(c.total,0) - COALESCE((SELECT SUM(n.total) FROM conduces_nc n WHERE n.conduce_id = c.id AND n.estado = 'emitida'), 0)) as total_neto
        FROM conduces c
        LEFT JOIN customers cu ON c.customer_id = cu.id
        LEFT JOIN choferes ch ON c.chofer_id = ch.id
