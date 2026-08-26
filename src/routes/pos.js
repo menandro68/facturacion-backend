@@ -27,6 +27,10 @@ const logActividad = require('../utils/logActividad');
         creado_en TIMESTAMP DEFAULT NOW()
       )
     `);
+       await pool.query(`
+      ALTER TABLE cambios_pos ADD COLUMN IF NOT EXISTS monto_recibido DECIMAL(12,2) DEFAULT 0;
+      ALTER TABLE cambios_pos ADD COLUMN IF NOT EXISTS devuelta DECIMAL(12,2) DEFAULT 0;
+    `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cambios_pos_items (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -211,12 +215,14 @@ router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
     const numCambio = parseInt(maxQ.rows[0].maximo) + 1;
     const numTexto = 'CB-' + String(numCambio).padStart(4, '0');
     const cambio = await client.query(
-      `INSERT INTO cambios_pos (tenant_id, numero, numero_cambio, invoice_id, factura_ncf, cliente_nombre,
-        total_devuelto, total_nuevo, diferencia, metodo_pago, caja_id, operador_id, autorizado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+        `INSERT INTO cambios_pos (tenant_id, numero, numero_cambio, invoice_id, factura_ncf, cliente_nombre,
+        total_devuelto, total_nuevo, diferencia, metodo_pago, caja_id, operador_id, autorizado_por,
+        monto_recibido, devuelta)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [tenant_id, numTexto, numCambio, invoice_id, fac.ncf || null, fac.cliente_nombre || 'Consumidor Final',
        totalDev, totalNue, diferencia, diferencia > 0 ? (metodo_pago || 'efectivo') : null,
-       cajaId, req.user.operador_id || null, autorizado_por || null]
+       cajaId, req.user.operador_id || null, autorizado_por || null,
+       parseFloat(req.body.monto_recibido) || 0, parseFloat(req.body.devuelta) || 0]
     );
     const cambioId = cambio.rows[0].id;
     for (const it of items_devueltos) {
@@ -350,9 +356,15 @@ router.get('/cambio/:id/ticket', verifyToken, tenantGuard, async (req, res) => {
     filaLR('TOTAL NUEVO', fmtN(cam.total_nuevo), 8);
       filaLR('DIFERENCIA', fmtN(cam.diferencia), 10, true);
     y += 4;
-    if (parseFloat(cam.diferencia) > 0) {
+     if (parseFloat(cam.diferencia) > 0) {
       filaLR('FORMA DE PAGO', (cam.metodo_pago || 'efectivo').toUpperCase(), 8);
       y += 2;
+      if ((cam.metodo_pago || 'efectivo') === 'efectivo') {
+        filaLR('RECIBIDO', fmtN(cam.monto_recibido), 8);
+        y += 2;
+        filaLR('DEVUELTA', fmtN(cam.devuelta), 8, true);
+        y += 2;
+      }
     }
     y += 3;
     lineaGuiones();
