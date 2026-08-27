@@ -287,6 +287,20 @@ router.post('/cambio', verifyToken, tenantGuard, async (req, res) => {
 });
 
 // GET /pos/cambio/:id/ticket - Ticket 80mm del cambio de mercancia
+router.get('/cambio/por-factura/:invoice_id', verifyToken, tenantGuard, async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const { invoice_id } = req.params;
+    const r = await pool.query(
+      'SELECT numero FROM cambios_pos WHERE invoice_id = $1 AND tenant_id = $2 LIMIT 1',
+      [invoice_id, tenant_id]
+    );
+    res.json({ success: true, data: r.rows[0] || null });
+  } catch (error) {
+    res.status(500).json({ success: false, mensaje: error.message });
+  }
+});
+
 router.get('/cambio/:id/ticket', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
