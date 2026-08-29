@@ -427,10 +427,27 @@ const invoice = await client.query(
     // 9. NO rebajar inventario: el conduce ya lo hizo (inventario_rebajado = true)
 
     // 10. Marcar el conduce como facturado
-    await client.query(
+      await client.query(
       `UPDATE conduces SET facturado = true, factura_id = $1 WHERE id = $2`,
       [invoice_id, id]
     );
+    // 11. Transferir los pagos del conduce a la factura para que el balance quede correcto
+    await client.query(
+      `UPDATE payments SET invoice_id = $1 WHERE conduce_id = $2 AND tenant_id = $3`,
+      [invoice_id, id, tenant_id]
+    );
+    const pagadoCd = await client.query(
+      `SELECT COALESCE(SUM(monto), 0) as total FROM payments
+       WHERE invoice_id = $1 AND (estado = 'confirmado' OR estado = 'pendiente' OR estado IS NULL)`,
+      [invoice_id]
+    );
+    const totalFacCd = parseFloat(invoice.rows[0].total) || 0;
+    if (parseFloat(pagadoCd.rows[0].total) >= totalFacCd - 0.01) {
+      await client.query(
+        `UPDATE invoices SET estado = 'pagada' WHERE id = $1 AND tenant_id = $2`,
+        [invoice_id, tenant_id]
+      );
+    }
 
     await client.query('COMMIT');
     res.json({ success: true, data: invoice.rows[0] });
