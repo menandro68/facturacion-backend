@@ -1,4 +1,5 @@
 ﻿const express = require('express');
+const contaAuto = require('../utils/contabilidadAuto');
 const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
@@ -8,6 +9,12 @@ const QRCode = require('qrcode');
 const bwipjs = require('bwip-js');
 const { obtenerProximoNumeroFactura } = require('../helpers/numeroFactura');
 const { tipoNcfDesdeCliente } = require('../helpers/tipoComprobante');
+
+// Muestra la cantidad sin decimales cuando es entera, y con decimales cuando los tiene
+const formatearCantidad = (valor) => {
+  const n = parseFloat(valor || 0);
+  return Number.isInteger(n) ? String(n) : String(n);
+};
 
 // TIPO DE ENTREGA: el vendedor indica si el pedido se despacha como factura o como conduce
 (async () => {
@@ -38,7 +45,8 @@ router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
               ii.precio_unitario, ii.subtotal,
               CASE WHEN COALESCE(ii.total, 0) > 0 THEN ii.total
                    ELSE COALESCE(ii.cantidad, 0) * COALESCE(ii.precio_unitario, 0) END as total,
-              COALESCE(p.comision_vendedor, 0) as comision_vendedor
+                    COALESCE(p.comision_vendedor, 0) as comision_vendedor,
+              COALESCE(p.precio_vendedor, 0) as precio_vendedor
        FROM invoice_items ii
        LEFT JOIN products p ON ii.product_id = p.id
        INNER JOIN invoices i ON ii.invoice_id = i.id
@@ -48,7 +56,8 @@ router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
               ci.precio_unitario,
               (ci.cantidad * ci.precio_unitario) / (1 + COALESCE(ci.itbis_rate,0)/100) as subtotal,
               (ci.cantidad * ci.precio_unitario) as total,
-              COALESCE(pc.comision_vendedor, 0) as comision_vendedor
+                    COALESCE(pc.comision_vendedor, 0) as comision_vendedor,
+              COALESCE(pc.precio_vendedor, 0) as precio_vendedor
        FROM conduces_items ci
        LEFT JOIN products pc ON ci.product_id = pc.id
        INNER JOIN conduces c ON ci.conduce_id = c.id
@@ -64,6 +73,8 @@ router.get('/items/todos', verifyToken, tenantGuard, async (req, res) => {
 router.get('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
+    // Un vendedor solo ve las facturas de sus propios clientes
+    const esVendedor = (req.user.rol === 'vendedor' && req.user.vendedor_id) ? req.user.vendedor_id : null;
 const result = await pool.query(
       `SELECT i.*, c.nombre as cliente_nombre,
         COALESCE((
@@ -94,11 +105,12 @@ const result = await pool.query(
                   AND nc.estado = 'nota_credito'
                   AND nc.tenant_id = i.tenant_id
               ), 0)) as total_neto
-       FROM invoices i
+          FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        WHERE i.tenant_id = $1
+         AND ($2::uuid IS NULL OR c.vendedor_id = $2::uuid)
        ORDER BY i.creado_en DESC`,
-      [tenant_id]
+      [tenant_id, esVendedor]
     );
     res.json({ success: true, data: result.rows });
   } catch (error) {
@@ -884,7 +896,16 @@ for (const item of items) {
         )
       }
     }
-    await client.query('COMMIT');
+      await client.query('COMMIT');
+
+    // Asiento contable automatico. Si falla, la factura ya quedo emitida igual.
+    contaAuto.asientoFactura({
+      tenant_id,
+      invoice: invoice.rows[0],
+      esContado: parseFloat(monto_recibido) > 0,
+      usuario_id: req.user.operador_id || req.user.id || null
+    }).catch(() => {});
+
     res.status(201).json({ success: true, data: invoice.rows[0] });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -1249,12 +1270,15 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
               c.email as cliente_negocio,
 t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
              t.telefono as empresa_telefono, t.direccion as empresa_direccion, t.actividad as empresa_actividad,
-              v.nombre as vendedor_nombre,
+                 v.nombre as vendedor_nombre,
+              COALESCE(cj.nombre, op.nombre) as cajero_nombre,
               ref.ncf as ref_ncf, ref.numero_factura as ref_numero_factura
        FROM invoices i
        LEFT JOIN customers c ON i.customer_id = c.id
        JOIN tenants t ON i.tenant_id = t.id
        LEFT JOIN vendedores v ON c.vendedor_id = v.id
+       LEFT JOIN cajeros cj ON i.operador_id = cj.id
+       LEFT JOIN operadores op ON i.operador_id = op.id
        LEFT JOIN invoices ref ON i.referencia_id = ref.id
        WHERE i.id = $1 AND i.tenant_id = $2`,
       [id, tenant_id]
@@ -1367,10 +1391,16 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
       const condMap = { contado: 'Contado', '7_dias': '7 Dias', '15_dias': '15 Dias', '30_dias': '30 Dias', '45_dias': '45 Dias', '60_dias': '60 Dias' };
       doc.fillColor(negro).fontSize(10).font('Helvetica-Bold')
          .text(condMap[data.cliente_condiciones] || 'Contado', cx + 8, y + 20);
+         // Si la factura salio del POS, quien atendio es el CAJERO, no un vendedor
+      const esPOS = !!data.caja_id || String(data.notas || '').startsWith('POS - Pago:');
+      const etiquetaAtendio = esPOS ? 'Cajero:' : 'Vendedor:';
+      const nombreAtendio = esPOS
+        ? (data.cajero_nombre || data.vendedor_nombre || 'N/A')
+        : (data.vendedor_nombre || 'N/A');
       doc.fontSize(8).font('Helvetica').fillColor(grisTexto)
-         .text('Vendedor:', cx + 8, y + 36);
+         .text(etiquetaAtendio, cx + 8, y + 36);
       doc.fillColor(negro)
-         .text(data.vendedor_nombre || 'N/A', cx + 60, y + 36, { width: blockW - 68 });
+         .text(nombreAtendio, cx + 60, y + 36, { width: blockW - 68 });
       doc.fillColor(grisTexto)
          .text('Negocio:', cx + 8, y + 48);
       doc.fillColor(negro)
@@ -1458,7 +1488,7 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
       doc.fillColor(negro)
          .text(item.descripcion, colDescX, y + 4, { width: colDescW })
-         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 4, { width: colCantW, align: 'right' })
+         .text(formatearCantidad(item.cantidad), colCantX, y + 4, { width: colCantW, align: 'right' })
          .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 4, { width: colPUnitW, align: 'right' })
          .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 4, { width: colSubW, align: 'right' })
          .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 4, { width: colItbisW, align: 'right' })
@@ -1682,7 +1712,7 @@ router.get('/:id/pdf-carta', verifyToken, tenantGuard, async (req, res) => {
       const subtotalLinea = parseFloat(item.cantidad) * parseFloat(item.precio_unitario);
       doc.fillColor(negro)
          .text(item.descripcion, colDescX, y + 7, { width: colDescW })
-         .text(parseFloat(item.cantidad).toFixed(0), colCantX, y + 7, { width: colCantW, align: 'right' })
+         .text(formatearCantidad(item.cantidad), colCantX, y + 7, { width: colCantW, align: 'right' })
          .text(parseFloat(item.precio_unitario).toLocaleString('es-DO', {minimumFractionDigits: 2}), colPUnitX, y + 7, { width: colPUnitW, align: 'right' })
          .text(subtotalLinea.toLocaleString('es-DO', {minimumFractionDigits: 2}), colSubX, y + 7, { width: colSubW, align: 'right' })
          .text(parseFloat(item.itbis_monto).toLocaleString('es-DO', {minimumFractionDigits: 2}), colItbisX, y + 7, { width: colItbisW, align: 'right' })

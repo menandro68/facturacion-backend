@@ -5,3 +5,9 @@ node_modules/
 test-neon.js
 inventario-pre.js
 *.log
+
+# Datos e importaciones puntuales
+clientes_comercial_hd.json
+proveedores_comercial_hd.json
+importar_clientes_hd.js
+importar_proveedores_hd.js

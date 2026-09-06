@@ -39,7 +39,7 @@ router.get('/:id', verifyToken, tenantGuard, async (req, res) => {
 router.post('/', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
-    const { nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones } = req.body;
+       const { nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones, tipo_precio } = req.body;
     if (!nombre) return res.status(400).json({ success: false, mensaje: 'El nombre es requerido' });
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
@@ -61,10 +61,10 @@ if (vendedor_id && zona_id) {
       }
     }
     const result = await pool.query(
-      `INSERT INTO customers (tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      `INSERT INTO customers (tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones, tipo_precio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo || 'consumidor_final',
-       vendedor_id || null, zona_id || null, condiciones || null]
+          vendedor_id || null, zona_id || null, condiciones || null, tipo_precio || 1]
     );
     logActividad(req, 'clientes', 'crear', `Creó cliente ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -78,7 +78,7 @@ router.put('/:id', verifyToken, tenantGuard, async (req, res) => {
   try {
     const { tenant_id } = req.user;
     const { id } = req.params;
-    const { nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones } = req.body;
+       const { nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones, tipo_precio } = req.body;
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS vendedor_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zona_id UUID`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS condiciones VARCHAR(50)`);
@@ -99,11 +99,11 @@ if (vendedor_id && zona_id) {
       }
     }
     const result = await pool.query(
-      `UPDATE customers SET nombre=$1, rnc_cedula=$2, email=$3, telefono=$4, direccion=$5, tipo=$6,
-       vendedor_id=$7, zona_id=$8, condiciones=$9, actualizado_en=NOW()
-       WHERE id=$10 AND tenant_id=$11 RETURNING *`,
+         `UPDATE customers SET nombre=$1, rnc_cedula=$2, email=$3, telefono=$4, direccion=$5, tipo=$6,
+       vendedor_id=$7, zona_id=$8, condiciones=$9, tipo_precio=$10, actualizado_en=NOW()
+       WHERE id=$11 AND tenant_id=$12 RETURNING *`,
       [nombre, rnc_cedula, email, telefono, direccion, tipo,
-       vendedor_id || null, zona_id || null, condiciones || null, id, tenant_id]
+       vendedor_id || null, zona_id || null, condiciones || null, tipo_precio || 1, id, tenant_id]
     );
     if (!result.rows[0]) return res.status(404).json({ success: false, mensaje: 'Cliente no encontrado' });
     logActividad(req, 'clientes', 'editar', `Editó cliente ${nombre}`, id);

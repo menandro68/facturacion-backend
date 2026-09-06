@@ -1,4 +1,5 @@
 const express = require('express');
+const contaAuto = require('../utils/contabilidadAuto');
 const router = express.Router();
 const pool = require('../config/db');
 const verifyToken = require('../middleware/auth');
@@ -61,7 +62,16 @@ const { invoice_id, conduce_id, monto, metodo, referencia, notas } = req.body;
         [conduce_id, tenant_id]
       );
       if (!conduce.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Conduce no encontrado' }); }
-      if (conduce.rows[0].estado === 'anulado') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede pagar un conduce anulado' }); }
+            if (conduce.rows[0].estado === 'anulado') { await client.query('ROLLBACK'); return res.status(400).json({ success: false, mensaje: 'No se puede pagar un conduce anulado' }); }
+
+      // Un vendedor solo puede cobrar documentos de sus propios clientes
+      if (req.user.rol === 'vendedor' && req.user.vendedor_id) {
+        const duenoCd = await client.query(
+          `SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 AND vendedor_id = $3::uuid`,
+          [conduce.rows[0].customer_id, tenant_id, req.user.vendedor_id]
+        );
+        if (!duenoCd.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' }); }
+      }
 
       const paymentCd = await client.query(
         `INSERT INTO payments (tenant_id, conduce_id, monto, metodo, referencia, notas, vendedor_nombre, estado, operador_id)
@@ -101,6 +111,15 @@ const { invoice_id, conduce_id, monto, metodo, referencia, notas } = req.body;
     }
 if (invoice.rows[0].estado === 'pagada') {
       return res.status(400).json({ success: false, mensaje: 'La factura ya está pagada' });
+    }
+
+        // Un vendedor solo puede cobrar documentos de sus propios clientes
+    if (req.user.rol === 'vendedor' && req.user.vendedor_id) {
+      const duenoFac = await client.query(
+        `SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 AND vendedor_id = $3::uuid`,
+        [invoice.rows[0].customer_id, tenant_id, req.user.vendedor_id]
+      );
+      if (!duenoFac.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ success: false, mensaje: 'Factura no encontrada' }); }
     }
 
     // ── Validar balance real: pagos CONFIRMADOS + PENDIENTES, menos notas de credito ──
@@ -163,7 +182,18 @@ if (invoice.rows[0].estado === 'pagada') {
       );
     }
 
-    await client.query('COMMIT');
+      await client.query('COMMIT');
+
+    // Asiento contable automatico. Si falla, el pago ya quedo registrado igual.
+    if (estado_pago === 'confirmado') {
+      contaAuto.asientoPago({
+        tenant_id,
+        pago: payment.rows[0],
+        documento: invoice.rows[0].ncf || invoice.rows[0].numero_factura || null,
+        usuario_id: req.user.operador_id || req.user.id || null
+      }).catch(() => {});
+    }
+
     res.status(201).json({
       success: true,
       data: payment.rows[0],

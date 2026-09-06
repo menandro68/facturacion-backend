@@ -139,12 +139,8 @@ return res.json({
       [(usuario || email || '').toLowerCase().trim()]
     );
 
-    if (resultOperador.rows.length > 0) {
+      if (resultOperador.rows.length > 0 && (!rol_esperado || rol_esperado === 'operador')) {
       const operador = resultOperador.rows[0];
-
-      if (rol_esperado && rol_esperado !== 'operador') {
-        return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
-      }
       if (operador.tenant_estado !== 'activo') {
         return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
       }
@@ -197,12 +193,9 @@ return res.json({
       [(usuario || email || '')]
     );
 
-    if (resultCajero.rows.length > 0) {
+        if (resultCajero.rows.length > 0 && (!rol_esperado || rol_esperado === 'operador' || rol_esperado === 'cajero')) {
       const cajero = resultCajero.rows[0];
 
-     if (rol_esperado && rol_esperado !== 'operador' && rol_esperado !== 'cajero') {
-        return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
-      }
       if (cajero.tenant_estado !== 'activo') {
         return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
       }
@@ -261,11 +254,8 @@ return res.json({
       return res.status(401).json({ mensaje: 'Credenciales incorrectas' });
     }
 
-    const vendedor = resultVendedor.rows[0];
+     const vendedor = resultVendedor.rows[0];
 
-    if (rol_esperado && rol_esperado !== 'vendedor') {
-      return res.status(401).json({ mensaje: 'Estas credenciales no corresponden a este tipo de usuario' });
-    }
     if (vendedor.tenant_estado !== 'activo') {
       return res.status(401).json({ mensaje: 'Cuenta suspendida. Contacte soporte.' });
     }
