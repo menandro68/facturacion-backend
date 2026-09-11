@@ -541,7 +541,15 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
     doc.text('SUBTOTAL', colSubX, y + 6, { width: 87, align: 'right' });
     y += 22;
 
-    doc.font('Helvetica').fontSize(10);
+       doc.font('Helvetica').fontSize(10);
+    // Descuento global del conduce: las lineas se muestran a precio bruto (antes del descuento)
+    let descLineasCond = 0;
+    if (d.notas) {
+      const mDescLn = String(d.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
+      if (mDescLn) descLineasCond = parseFloat(String(mDescLn[1]).replace(/,/g, '')) || 0;
+    }
+    const netoLineasCond = items.reduce((s, it) => s + (parseFloat(it.cantidad) || 0) * (parseFloat(it.precio_unitario) || 0), 0);
+    const factorBrutoCond = netoLineasCond > 0 ? (netoLineasCond + descLineasCond) / netoLineasCond : 1;
     let totalDoc = 0;
     items.forEach((it, i) => {
       const rowH = 20;
@@ -555,8 +563,10 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       doc.fillColor('#1e293b');
       doc.text(it.descripcion || '', colDescX + 8, y + 5, { width: colCantX - colDescX - 16 });
       doc.text(cant.toFixed(2), colCantX, y + 5, { width: 70, align: 'right' });
-      doc.text('RD$' + precio.toLocaleString('es-DO', { minimumFractionDigits: 2 }), colPrecioX, y + 5, { width: 80, align: 'right' });
-      doc.text('RD$' + sub.toLocaleString('es-DO', { minimumFractionDigits: 2 }), colSubX, y + 5, { width: 87, align: 'right' });
+           const precioBruto = Math.round(precio * factorBrutoCond * 100) / 100;
+      const subBruto = Math.round(cant * precioBruto * 100) / 100;
+      doc.text('RD$' + precioBruto.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), colPrecioX, y + 5, { width: 80, align: 'right' });
+      doc.text('RD$' + subBruto.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), colSubX, y + 5, { width: 87, align: 'right' });
       y += rowH;
     });
 
@@ -573,14 +583,10 @@ router.get('/:id/pdf', verifyToken, tenantGuard, async (req, res) => {
       itbisCond += bruto - (bruto / (1 + (r / 100)));
     });
     const subNetoCond = totalDoc - itbisCond;
-    let descCond = 0;
-    if (d.notas) {
-      const mDescCd = String(d.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
-      if (mDescCd) descCond = parseFloat(String(mDescCd[1]).replace(/,/g, '')) || 0;
-    }
+    let descCond = descLineasCond;
     const fmtCond = (n) => 'RD$' + parseFloat(n || 0).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const filasCond = [
-      ['TOTAL BRUTO', subNetoCond + descCond],
+      ['TOTAL BRUTO', subNetoCond + itbisCond + descCond],
       ['TOTAL DESC.', descCond],
       ['SUB-TOTAL', subNetoCond],
       ['TOTAL ITBIS', itbisCond]

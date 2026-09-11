@@ -60,11 +60,17 @@ if (vendedor_id && zona_id) {
         return res.status(400).json({ success: false, mensaje: `Ya existe un cliente con el RNC/Cédula ${rnc_cedula.trim()} (${dup.rows[0].nombre}). No se permiten duplicados.` });
       }
     }
+    // Tipo de precio inicial: COMERCIAL H D usa Precio 2 por defecto
+    let tipoPrecioInicial = parseInt(tipo_precio) || 1;
+    if (!tipo_precio) {
+      const ten = await pool.query('SELECT nombre FROM tenants WHERE id = $1', [tenant_id]);
+      if (ten.rows[0]?.nombre === 'COMERCIAL H D') tipoPrecioInicial = 2;
+    }
     const result = await pool.query(
       `INSERT INTO customers (tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo, vendedor_id, zona_id, condiciones, tipo_precio)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [tenant_id, nombre, rnc_cedula, email, telefono, direccion, tipo || 'consumidor_final',
-          vendedor_id || null, zona_id || null, condiciones || null, tipo_precio || 1]
+          vendedor_id || null, zona_id || null, condiciones || null, tipoPrecioInicial]
     );
     logActividad(req, 'clientes', 'crear', `Creó cliente ${nombre}`, result.rows[0].id);
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -72,6 +78,7 @@ if (vendedor_id && zona_id) {
     res.status(500).json({ success: false, mensaje: error.message });
   }
 });
+
 
 // PUT - Actualizar cliente
 router.put('/:id', verifyToken, tenantGuard, async (req, res) => {

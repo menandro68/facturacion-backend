@@ -1517,8 +1517,9 @@ t.nombre as empresa_nombre, t.rnc as empresa_rnc, t.email as empresa_email,
       const mDesc = String(data.notas).match(/Descuento:\s*RD\$\s*([\d.,]+)/i);
       if (mDesc) descTot = parseFloat(String(mDesc[1]).replace(/,/g, '')) || 0;
     }
-    const subNeto = parseFloat(data.subtotal) || 0;
-    const brutoTot = subNeto + descTot;
+       const subNeto = parseFloat(data.subtotal) || 0;
+    // TOTAL BRUTO = Sub-Total + ITBIS + Descuento (igual que la pantalla de factura)
+    const brutoTot = subNeto + (parseFloat(data.itbis) || 0) + descTot;
     const filasTot = [
       ['TOTAL BRUTO', brutoTot],
       ['TOTAL DESC.', descTot],
